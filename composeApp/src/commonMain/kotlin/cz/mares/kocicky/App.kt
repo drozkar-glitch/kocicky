@@ -59,7 +59,7 @@ fun App() {
             if (familyCode.isNotBlank() && familyPin.isNotBlank()) {
                 "☁️ Připojování ($familyCode)..."
             } else {
-                "📱 Pouze v telefonu (klepni pro ☁️)"
+                "📱 V telefonu (klepni pro ☁️)"
             }
         )
     }
@@ -86,18 +86,18 @@ fun App() {
         }
 
         if (familyCode.isBlank() || familyPin.isBlank()) {
-            syncStatusText = "📱 Uloženo v telefonu (nepřihlášeno)"
+            syncStatusText = "📱 V telefonu (klepni pro ☁️)"
             return
         }
 
         isSyncing = true
-        syncStatusText = "☁️ Ukládám na server ($familyCode)..."
+        syncStatusText = "☁️ Ukládám ($familyCode)..."
         PlatformManager.syncToFirebase(familyCode, familyPin, json) { ok, info ->
             isSyncing = false
             syncStatusText = if (ok) {
-                "☁️ Uloženo na serveru ($familyCode)"
+                "☁️ Synchronizováno ($familyCode)"
             } else {
-                "📱 V telefonu – server: $info"
+                "📱 V telefonu ($info)"
             }
         }
     }
@@ -108,12 +108,12 @@ fun App() {
         manualLogin: Boolean = false
     ) {
         if (targetCode.isBlank() || targetPin.isBlank()) {
-            syncStatusText = "📱 Pouze v telefonu (klepni pro ☁️)"
+            syncStatusText = "📱 V telefonu (klepni pro ☁️)"
             return
         }
 
         isSyncing = true
-        syncStatusText = "☁️ Ověřuji účet $targetCode..."
+        syncStatusText = "☁️ Ověřuji $targetCode..."
         PlatformManager.fetchFromFirebase(targetCode, targetPin) { ok, remoteJson, info ->
             isSyncing = false
             if (ok && !remoteJson.isNullOrBlank() && remoteJson != "null") {
@@ -136,13 +136,12 @@ fun App() {
                     syncStatusText = "⚠️ Neplatná data na serveru"
                 }
             } else if (ok && (remoteJson == null || remoteJson == "null")) {
-                // Pod tímto účtem a PINem na serveru zatím nic není
-                syncStatusText = "⚠️ Účet/PIN nenalezen na serveru"
+                syncStatusText = "⚠️ Účet/PIN nenalezen"
                 if (manualLogin) {
                     bannerMessage = "Pod účtem '$targetCode' a zadaným PINem na serveru nic není. Zkontroluj překlep, nebo v ☁️ zvol 'Nahrát tento telefon na server'."
                 }
             } else {
-                syncStatusText = "📱 Offline / Zamítnuto ($info)"
+                syncStatusText = "📱 Offline / Chyba ($info)"
                 if (manualLogin) {
                     bannerMessage = "Server vrátil odpověď: $info (zkontroluj účet, PIN nebo pravidla Firebase)."
                 }
@@ -543,7 +542,7 @@ fun App() {
                     familyPin = ""
                     PlatformManager.saveFamilyCode("")
                     PlatformManager.saveFamilyPin("")
-                    syncStatusText = "📱 Pouze v telefonu (klepni pro ☁️)"
+                    syncStatusText = "📱 V telefonu (klepni pro ☁️)"
                     showCloudDialog = false
                     bannerMessage = "Server byl odpojen. Data zůstávají bezpečně v telefonu."
                 }
@@ -568,7 +567,7 @@ private fun TopHeaderBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -576,21 +575,23 @@ private fun TopHeaderBar(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(BabyPinkSoft)
                         .border(1.5.dp, BabyPinkAccent, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🐱", fontSize = 20.sp)
+                    Text("🐱", fontSize = 19.sp)
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Terezčiny Kočičky",
                         color = CocoaBrown,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = "Safírka (Ragdollka) & Zlatín (Mainská mývalí)",
@@ -607,7 +608,7 @@ private fun TopHeaderBar(
                         .background(BgBeigeWarm)
                         .border(1.dp, SoftBorder, RoundedCornerShape(12.dp))
                         .clickable { onRefreshClick() }
-                        .padding(horizontal = 9.dp, vertical = 6.dp)
+                        .padding(horizontal = 9.dp, vertical = 5.dp)
                 ) {
                     Text("🔄", fontSize = 14.sp)
                 }
@@ -617,29 +618,32 @@ private fun TopHeaderBar(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
                     modifier = Modifier
+                        .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
                         .background(BgBeigeLight)
                         .border(1.dp, SoftBorder, RoundedCornerShape(10.dp))
                         .clickable { onCloudClick() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = syncStatusText,
                         color = CocoaBrown,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
                 val pillText = if (pendingMedsToday == 0) {
-                    "✨ Všechny dnešní léky podány"
+                    "✨ Dnes vše podáno"
                 } else {
-                    "💊 Dnes zbývá podat: $pendingMedsToday"
+                    "💊 Dnes podat: $pendingMedsToday"
                 }
                 val pillColor = if (pendingMedsToday == 0) Color(0xFFE6F6EC) else Color(0xFFFFE4EC)
 
@@ -647,13 +651,14 @@ private fun TopHeaderBar(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .background(pillColor)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = pillText,
                         color = CocoaBrown,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
                     )
                 }
             }
@@ -671,7 +676,7 @@ private fun CatQuickSelectorRow(
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -683,7 +688,7 @@ private fun CatQuickSelectorRow(
                     .background(if (isAll) BabyPinkAccent else BgBeigeLight)
                     .border(1.dp, if (isAll) BabyPinkDeep else SoftBorder, RoundedCornerShape(18.dp))
                     .clickable { onSelectCat(null) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = "🐾 Všechny (${cats.size})",
@@ -702,7 +707,7 @@ private fun CatQuickSelectorRow(
                     .background(if (isSelected) BabyPinkAccent else BgBeigeLight)
                     .border(1.dp, if (isSelected) BabyPinkDeep else SoftBorder, RoundedCornerShape(18.dp))
                     .clickable { onSelectCat(if (isSelected) null else cat.id) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = "${if (cat.breedType == "RAGDOLL") "💎" else if (cat.breedType == "MAINE_COON") "🦁" else "🐱"} ${cat.name}",
@@ -720,7 +725,7 @@ private fun CatQuickSelectorRow(
                     .background(BgBeigeWarm)
                     .border(1.dp, BabyPinkAccent, RoundedCornerShape(18.dp))
                     .clickable { onAddCatClick() }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = "+ Další kočička",
@@ -748,7 +753,7 @@ private fun CatsTabScreen(
             .fillMaxSize()
             .padding(horizontal = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(bottom = 16.dp)
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
         items(cats) { cat ->
             val catMeds = medications.filter { it.catId == cat.id }
@@ -764,14 +769,14 @@ private fun CatsTabScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CatAvatar(cat = cat, size = 90.dp)
-                        Spacer(modifier = Modifier.width(14.dp))
+                        CatAvatar(cat = cat, size = 86.dp)
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = cat.name,
                                     color = CocoaBrown,
-                                    fontSize = 20.sp,
+                                    fontSize = 19.sp,
                                     fontWeight = FontWeight.ExtraBold
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -797,7 +802,7 @@ private fun CatsTabScreen(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Kontrola: ${cat.lastCheckedDate}",
                                 color = CocoaMuted,
@@ -1008,8 +1013,8 @@ private fun StatusAndLogsTabScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(bottom = 16.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
         item {
             Text(
@@ -1136,27 +1141,30 @@ private fun StatusAndLogsTabScreen(
         }
 
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "📖 Deníček zdraví a péče (${logs.size})",
                     color = CocoaBrown,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
+                Spacer(modifier = Modifier.height(6.dp))
                 Button(
                     onClick = onAddHealthLog,
                     colors = ButtonDefaults.buttonColors(
                         backgroundColor = BabyPinkAccent,
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
                 ) {
-                    Text("+ Nový záznam", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "➕ Přidat nový záznam do deníčku",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -1237,36 +1245,38 @@ private fun MedicationsTabScreen(
             .fillMaxSize()
             .padding(horizontal = 14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(bottom = 16.dp)
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "💊 Sledování léků a vitamínů",
-                        color = CocoaBrown,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = "Odškrtni podání léku nebo zapni upozornění na čas",
-                        color = CocoaMuted,
-                        fontSize = 11.sp
-                    )
-                }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "💊 Sledování léků a vitamínů",
+                    color = CocoaBrown,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "Odškrtni podání léku nebo zapni upozornění na čas",
+                    color = CocoaMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = onAddMedClick,
                     colors = ButtonDefaults.buttonColors(
                         backgroundColor = BabyPinkAccent,
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
                 ) {
-                    Text("+ Přidat lék", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "➕ Přidat nový lék nebo vitamín",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -1438,7 +1448,7 @@ private fun NotificationsAndCloudTabScreen(
             .fillMaxSize()
             .padding(horizontal = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(bottom = 16.dp)
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
         item {
             Card(
@@ -2270,7 +2280,7 @@ private fun CloudSyncDialog(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Zadej ваш Rodinný účet (např. terezka) a vaše tajné Rodinné heslo / PIN. Při výměně telefonu stačí zadat stejné údaje a data se obnoví.",
+                    text = "Zadej váš Rodinný účet (např. terezka) a vaše tajné Rodinné heslo / PIN. Při výměně telefonu stačí zadat stejné údaje a data se obnoví.",
                     color = CocoaMuted,
                     fontSize = 11.sp
                 )
