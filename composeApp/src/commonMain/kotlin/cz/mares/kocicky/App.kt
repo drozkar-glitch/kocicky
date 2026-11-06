@@ -51,7 +51,18 @@ fun App() {
     }
 
     var familyCode by remember { mutableStateOf(PlatformManager.loadFamilyCode()) }
-    var syncStatusText by remember { mutableStateOf("☁️ Připojování k serveru...") }
+    var familyPin by remember { mutableStateOf(PlatformManager.loadFamilyPin()) }
+    val isCloudLogged = familyCode.isNotBlank() && familyPin.isNotBlank()
+
+    var syncStatusText by remember {
+        mutableStateOf(
+            if (familyCode.isNotBlank() && familyPin.isNotBlank()) {
+                "☁️ Připojování ($familyCode)..."
+            } else {
+                "📱 Pouze v telefonu (klepni pro ☁️)"
+            }
+        )
+    }
     var isSyncing by remember { mutableStateOf(false) }
 
     var activeTab by remember { mutableStateOf(MainTab.CATS) }
@@ -73,58 +84,76 @@ fun App() {
         if (toastMsg != null) {
             bannerMessage = toastMsg
         }
+
+        if (familyCode.isBlank() || familyPin.isBlank()) {
+            syncStatusText = "📱 Uloženo v telefonu (nepřihlášeno)"
+            return
+        }
+
         isSyncing = true
-        syncStatusText = "☁️ Ukládám na server..."
-        PlatformManager.syncToFirebase(familyCode, json) { ok, info ->
+        syncStatusText = "☁️ Ukládám na server ($familyCode)..."
+        PlatformManager.syncToFirebase(familyCode, familyPin, json) { ok, info ->
             isSyncing = false
             syncStatusText = if (ok) {
                 "☁️ Uloženo na serveru ($familyCode)"
             } else {
-                "📱 Uloženo v telefonu ($info)"
+                "📱 V telefonu – server: $info"
             }
         }
     }
 
-    fun pullFromServer(manual: Boolean = false) {
+    fun pullFromServer(
+        targetCode: String = familyCode,
+        targetPin: String = familyPin,
+        manualLogin: Boolean = false
+    ) {
+        if (targetCode.isBlank() || targetPin.isBlank()) {
+            syncStatusText = "📱 Pouze v telefonu (klepni pro ☁️)"
+            return
+        }
+
         isSyncing = true
-        syncStatusText = "☁️ Načítám ze serveru..."
-        PlatformManager.fetchFromFirebase(familyCode) { ok, remoteJson, info ->
+        syncStatusText = "☁️ Ověřuji účet $targetCode..."
+        PlatformManager.fetchFromFirebase(targetCode, targetPin) { ok, remoteJson, info ->
             isSyncing = false
             if (ok && !remoteJson.isNullOrBlank() && remoteJson != "null") {
                 val remoteState = CatDataSerializer.deserialize(remoteJson)
                 if (remoteState != null) {
-                    if (manual || remoteState.updatedAt >= appState.updatedAt) {
+                    if (manualLogin || remoteState.updatedAt >= appState.updatedAt) {
                         appState = remoteState
                         PlatformManager.saveLocalData(CatDataSerializer.serialize(remoteState))
-                        syncStatusText = "☁️ Synchronizováno ($familyCode)"
-                        if (manual) {
-                            bannerMessage = "Data ze serveru ($familyCode) byla úspěšně načtena!"
+                        syncStatusText = "☁️ Synchronizováno ($targetCode)"
+                        if (manualLogin) {
+                            bannerMessage = "Data pro účet '$targetCode' byla úspěšně načtena ze serveru!"
                         }
                     } else {
                         val localJson = CatDataSerializer.serialize(appState)
-                        PlatformManager.syncToFirebase(familyCode, localJson) { upOk, _ ->
-                            syncStatusText = if (upOk) "☁️ Synchronizováno ($familyCode)" else "📱 V telefonu"
+                        PlatformManager.syncToFirebase(targetCode, targetPin, localJson) { upOk, _ ->
+                            syncStatusText = if (upOk) "☁️ Synchronizováno ($targetCode)" else "📱 V telefonu"
                         }
                     }
                 } else {
-                    syncStatusText = "☁️ Server připraven ($familyCode)"
+                    syncStatusText = "⚠️ Neplatná data na serveru"
                 }
             } else if (ok && (remoteJson == null || remoteJson == "null")) {
-                val localJson = CatDataSerializer.serialize(appState)
-                PlatformManager.syncToFirebase(familyCode, localJson) { upOk, _ ->
-                    syncStatusText = if (upOk) "☁️ Uloženo na serveru ($familyCode)" else "📱 V telefonu"
+                // Pod tímto účtem a PINem na serveru zatím nic není
+                syncStatusText = "⚠️ Účet/PIN nenalezen na serveru"
+                if (manualLogin) {
+                    bannerMessage = "Pod účtem '$targetCode' a zadaným PINem na serveru nic není. Zkontroluj překlep, nebo v ☁️ zvol 'Nahrát tento telefon na server'."
                 }
             } else {
-                syncStatusText = "📱 Režim offline ($info)"
-                if (manual) {
-                    bannerMessage = "Nepodařilo se spojit se serverem: $info"
+                syncStatusText = "📱 Offline / Zamítnuto ($info)"
+                if (manualLogin) {
+                    bannerMessage = "Server vrátil odpověď: $info (zkontroluj účet, PIN nebo pravidla Firebase)."
                 }
             }
         }
     }
 
     LaunchedEffect(Unit) {
-        pullFromServer(manual = false)
+        if (familyCode.isNotBlank() && familyPin.isNotBlank()) {
+            pullFromServer(familyCode, familyPin, manualLogin = false)
+        }
         appState.medications.forEach { med ->
             if (med.notificationsEnabled) {
                 PlatformManager.scheduleMedicationNotification(
@@ -168,7 +197,13 @@ fun App() {
                 syncStatusText = syncStatusText,
                 pendingMedsToday = pendingMedsToday,
                 onCloudClick = { showCloudDialog = true },
-                onRefreshClick = { pullFromServer(manual = true) }
+                onRefreshClick = {
+                    if (isCloudLogged) {
+                        pullFromServer(familyCode, familyPin, manualLogin = true)
+                    } else {
+                        showCloudDialog = true
+                    }
+                }
             )
 
             if (bannerMessage != null) {
@@ -367,6 +402,7 @@ fun App() {
                         medications = appState.medications,
                         notifications = appState.notifications,
                         familyCode = familyCode,
+                        isCloudLogged = isCloudLogged,
                         syncStatusText = syncStatusText,
                         onTestSystemNotification = {
                             PlatformManager.sendImmediateTestNotification(
@@ -470,20 +506,46 @@ fun App() {
         if (showCloudDialog) {
             CloudSyncDialog(
                 currentFamilyCode = familyCode,
+                currentFamilyPin = familyPin,
                 syncStatusText = syncStatusText,
                 isSyncing = isSyncing,
                 onDismiss = { showCloudDialog = false },
-                onSaveFamilyCodeAndPull = { newCode ->
-                    val cleaned = newCode.trim().lowercase().replace(" ", "_")
-                        .ifBlank { "terezka" }
-                    familyCode = cleaned
-                    PlatformManager.saveFamilyCode(cleaned)
-                    showCloudDialog = false
-                    pullFromServer(manual = true)
+                onLoginAndDownload = { codeInput, pinInput ->
+                    val cleanedCode = codeInput.trim().lowercase().replace(" ", "_")
+                    val cleanedPin = pinInput.trim().replace(" ", "_")
+                    if (cleanedCode.isBlank() || cleanedPin.isBlank()) {
+                        bannerMessage = "Zadej prosím Rodinný účet i Rodinné heslo / PIN."
+                    } else {
+                        familyCode = cleanedCode
+                        familyPin = cleanedPin
+                        PlatformManager.saveFamilyCode(cleanedCode)
+                        PlatformManager.saveFamilyPin(cleanedPin)
+                        showCloudDialog = false
+                        pullFromServer(cleanedCode, cleanedPin, manualLogin = true)
+                    }
                 },
-                onForceUpload = {
+                onSaveAndUpload = { codeInput, pinInput ->
+                    val cleanedCode = codeInput.trim().lowercase().replace(" ", "_")
+                    val cleanedPin = pinInput.trim().replace(" ", "_")
+                    if (cleanedCode.isBlank() || cleanedPin.isBlank()) {
+                        bannerMessage = "Pro nahrání na server vyplň Rodinný účet i PIN."
+                    } else {
+                        familyCode = cleanedCode
+                        familyPin = cleanedPin
+                        PlatformManager.saveFamilyCode(cleanedCode)
+                        PlatformManager.saveFamilyPin(cleanedPin)
+                        showCloudDialog = false
+                        persistAndSync(appState, "Data z telefonu byla nahrána pod účet '$cleanedCode'!")
+                    }
+                },
+                onDisconnectCloud = {
+                    familyCode = ""
+                    familyPin = ""
+                    PlatformManager.saveFamilyCode("")
+                    PlatformManager.saveFamilyPin("")
+                    syncStatusText = "📱 Pouze v telefonu (klepni pro ☁️)"
                     showCloudDialog = false
-                    persistAndSync(appState, "Data byla ručně odeslána na server ($familyCode)!")
+                    bannerMessage = "Server byl odpojen. Data zůstávají bezpečně v telefonu."
                 }
             )
         }
@@ -1363,6 +1425,7 @@ private fun NotificationsAndCloudTabScreen(
     medications: List<MedicationItem>,
     notifications: List<AppNotificationItem>,
     familyCode: String,
+    isCloudLogged: Boolean,
     syncStatusText: String,
     onTestSystemNotification: () -> Unit,
     onMarkAllRead: () -> Unit,
@@ -1467,20 +1530,24 @@ private fun NotificationsAndCloudTabScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "☁️ Ukládání dat na server (Firebase)",
+                        text = "☁️ Zabezpečená záloha na server (Účet + PIN)",
                         color = CocoaBrown,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Rodinný kód: $familyCode  •  Stav: $syncStatusText",
+                        text = if (isCloudLogged) {
+                            "Přihlášený účet: $familyCode (chráněno PINem) • $syncStatusText"
+                        } else {
+                            "Stav: Nepřihlášeno – data jsou uložena pouze v tomto telefonu"
+                        },
                         color = CocoaBrown,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Všechny stavy kočiček, léky i vybrané fotky se ukládají do telefonu i na server, takže k nim máte přístup z více zařízení.",
+                        text = "Při ztrátě nebo výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, reálné fotky i léky se ihned obnoví.",
                         color = CocoaMuted,
                         fontSize = 11.sp
                     )
@@ -1491,7 +1558,7 @@ private fun NotificationsAndCloudTabScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "⚙️ Nastavení serveru a rodinného kódu",
+                            text = "🔐 Nastavit Rodinný účet a PIN",
                             color = CocoaBrown,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -2174,13 +2241,16 @@ private fun AddHealthLogDialog(
 @Composable
 private fun CloudSyncDialog(
     currentFamilyCode: String,
+    currentFamilyPin: String,
     syncStatusText: String,
     isSyncing: Boolean,
     onDismiss: () -> Unit,
-    onSaveFamilyCodeAndPull: (String) -> Unit,
-    onForceUpload: () -> Unit
+    onLoginAndDownload: (String, String) -> Unit,
+    onSaveAndUpload: (String, String) -> Unit,
+    onDisconnectCloud: () -> Unit
 ) {
     var codeInput by remember { mutableStateOf(currentFamilyCode) }
+    var pinInput by remember { mutableStateOf(currentFamilyPin) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -2193,22 +2263,22 @@ private fun CloudSyncDialog(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "☁️ Záloha a synchronizace na server",
+                    text = "🔐 Rodinný účet a PIN (Server)",
                     color = CocoaBrown,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Stejný rodinný kód (např. terezka) zadej na všech telefonech, kde chcete sdílet Safírku a Zlatína.",
+                    text = "Zadej ваш Rodinný účet (např. terezka) a vaše tajné Rodinné heslo / PIN. Při výměně telefonu stačí zadat stejné údaje a data se obnoví.",
                     color = CocoaMuted,
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Aktuální stav: $syncStatusText",
+                    text = "Stav: $syncStatusText",
                     color = CocoaBrown,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -2216,42 +2286,70 @@ private fun CloudSyncDialog(
                 OutlinedTextField(
                     value = codeInput,
                     onValueChange = { codeInput = it },
-                    label = { Text("Rodinný kód složky na serveru") },
+                    label = { Text("Rodinný účet (např. terezka)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = pinInput,
+                    onValueChange = { pinInput = it },
+                    label = { Text("Rodinné heslo / PIN") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
+
                 Button(
-                    onClick = onForceUpload,
+                    onClick = { onLoginAndDownload(codeInput, pinInput) },
+                    enabled = !isSyncing,
+                    colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "⬇️ Přihlásit a stáhnout ze serveru",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Button(
+                    onClick = { onSaveAndUpload(codeInput, pinInput) },
                     enabled = !isSyncing,
                     colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkSoft),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "⬆️ Nahrát tato data z telefonu na server",
+                        text = "⬆️ Založit / Nahrát tento telefon na server",
                         color = CocoaBrown,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Zavřít", color = CocoaMuted)
+                    if (currentFamilyCode.isNotBlank() || currentFamilyPin.isNotBlank()) {
+                        TextButton(onClick = onDisconnectCloud) {
+                            Text("🔌 Odpojit", color = BabyPinkDeep, fontSize = 12.sp)
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.width(8.dp))
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { onSaveFamilyCodeAndPull(codeInput) },
-                        enabled = !isSyncing,
-                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
-                    ) {
-                        Text("⬇️ Uložit kód a načíst", color = Color.White, fontWeight = FontWeight.Bold)
+
+                    TextButton(onClick = onDismiss) {
+                        Text("Zavřít", color = CocoaMuted, fontWeight = FontWeight.Bold)
                     }
                 }
             }

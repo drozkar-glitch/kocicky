@@ -16,7 +16,8 @@ import platform.posix.memcpy
 actual object PlatformManager {
 
     private const val KEY_STATE_JSON = "terezciny_kocicky_state_v1"
-    private const val KEY_FAMILY_CODE = "terezciny_kocicky_family_v1"
+    private const val KEY_FAMILY_CODE = "terezciny_kocicky_family_v2"
+    private const val KEY_FAMILY_PIN = "terezciny_kocicky_pin_v2"
     private const val FIREBASE_BASE = "https://mares-games-default-rtdb.europe-west1.firebasedatabase.app"
 
     actual fun loadLocalData(): String? {
@@ -28,20 +29,46 @@ actual object PlatformManager {
     }
 
     actual fun loadFamilyCode(): String {
-        return NSUserDefaults.standardUserDefaults.stringForKey(KEY_FAMILY_CODE) ?: "terezka"
+        return NSUserDefaults.standardUserDefaults.stringForKey(KEY_FAMILY_CODE) ?: ""
     }
 
     actual fun saveFamilyCode(code: String) {
-        NSUserDefaults.standardUserDefaults.setObject(code, forKey = KEY_FAMILY_CODE)
+        NSUserDefaults.standardUserDefaults.setObject(code.trim(), forKey = KEY_FAMILY_CODE)
+    }
+
+    actual fun loadFamilyPin(): String {
+        return NSUserDefaults.standardUserDefaults.stringForKey(KEY_FAMILY_PIN) ?: ""
+    }
+
+    actual fun saveFamilyPin(pin: String) {
+        NSUserDefaults.standardUserDefaults.setObject(pin.trim(), forKey = KEY_FAMILY_PIN)
+    }
+
+    private fun sanitizeKey(raw: String): String {
+        return raw.trim()
+            .replace(".", "_")
+            .replace("#", "_")
+            .replace("$", "_")
+            .replace("[", "_")
+            .replace("]", "_")
+            .replace("/", "_")
+            .replace(" ", "_")
     }
 
     actual fun syncToFirebase(
         familyCode: String,
+        familyPin: String,
         jsonPayload: String,
         onResult: (Boolean, String) -> Unit
     ) {
-        val cleanCode = familyCode.trim().ifBlank { "terezka" }
-        val urlStr = "$FIREBASE_BASE/kocicky/$cleanCode.json"
+        val cleanCode = sanitizeKey(familyCode).lowercase()
+        val cleanPin = sanitizeKey(familyPin)
+        if (cleanCode.isBlank() || cleanPin.isBlank()) {
+            onResult(false, "Nepřihlášeno")
+            return
+        }
+
+        val urlStr = "$FIREBASE_BASE/kocicky/$cleanCode/$cleanPin.json"
         val nsUrl = NSURL.URLWithString(urlStr)
         if (nsUrl == null) {
             onResult(false, "URL")
@@ -68,10 +95,17 @@ actual object PlatformManager {
 
     actual fun fetchFromFirebase(
         familyCode: String,
+        familyPin: String,
         onResult: (Boolean, String?, String) -> Unit
     ) {
-        val cleanCode = familyCode.trim().ifBlank { "terezka" }
-        val urlStr = "$FIREBASE_BASE/kocicky/$cleanCode.json"
+        val cleanCode = sanitizeKey(familyCode).lowercase()
+        val cleanPin = sanitizeKey(familyPin)
+        if (cleanCode.isBlank() || cleanPin.isBlank()) {
+            onResult(false, null, "Nepřihlášeno")
+            return
+        }
+
+        val urlStr = "$FIREBASE_BASE/kocicky/$cleanCode/$cleanPin.json"
         val nsUrl = NSURL.URLWithString(urlStr)
         if (nsUrl == null) {
             onResult(false, null, "URL")

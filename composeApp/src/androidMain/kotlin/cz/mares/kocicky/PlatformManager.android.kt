@@ -23,7 +23,8 @@ actual object PlatformManager {
 
     private const val PREFS_NAME = "terezciny_kocicky_prefs"
     private const val KEY_STATE_JSON = "saved_cats_state_v1"
-    private const val KEY_FAMILY_CODE = "saved_family_code_v1"
+    private const val KEY_FAMILY_CODE = "saved_family_code_v2"
+    private const val KEY_FAMILY_PIN = "saved_family_pin_v2"
     private const val FIREBASE_BASE = "https://mares-games-default-rtdb.europe-west1.firebasedatabase.app"
 
     private var appCtx: Context? = null
@@ -53,27 +54,58 @@ actual object PlatformManager {
     }
 
     actual fun loadFamilyCode(): String {
-        val ctx = appCtx ?: return "terezka"
+        val ctx = appCtx ?: return ""
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_FAMILY_CODE, "terezka") ?: "terezka"
+        return prefs.getString(KEY_FAMILY_CODE, "") ?: ""
     }
 
     actual fun saveFamilyCode(code: String) {
         val ctx = appCtx ?: return
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_FAMILY_CODE, code).apply()
+        prefs.edit().putString(KEY_FAMILY_CODE, code.trim()).apply()
+    }
+
+    actual fun loadFamilyPin(): String {
+        val ctx = appCtx ?: return ""
+        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_FAMILY_PIN, "") ?: ""
+    }
+
+    actual fun saveFamilyPin(pin: String) {
+        val ctx = appCtx ?: return
+        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_FAMILY_PIN, pin.trim()).apply()
+    }
+
+    private fun sanitizeKey(raw: String): String {
+        return raw.trim()
+            .replace(".", "_")
+            .replace("#", "_")
+            .replace("$", "_")
+            .replace("[", "_")
+            .replace("]", "_")
+            .replace("/", "_")
     }
 
     actual fun syncToFirebase(
         familyCode: String,
+        familyPin: String,
         jsonPayload: String,
         onResult: (Boolean, String) -> Unit
     ) {
+        val cleanCode = sanitizeKey(familyCode).lowercase()
+        val cleanPin = sanitizeKey(familyPin)
+        if (cleanCode.isBlank() || cleanPin.isBlank()) {
+            onResult(false, "Nepřihlášeno")
+            return
+        }
+
         val mainHandler = Handler(Looper.getMainLooper())
         Thread {
             try {
-                val safeCode = URLEncoder.encode(familyCode.ifBlank { "terezka" }, "UTF-8")
-                val endpoint = URL("$FIREBASE_BASE/kocicky/$safeCode.json")
+                val encCode = URLEncoder.encode(cleanCode, "UTF-8")
+                val encPin = URLEncoder.encode(cleanPin, "UTF-8")
+                val endpoint = URL("$FIREBASE_BASE/kocicky/$encCode/$encPin.json")
                 val conn = (endpoint.openConnection() as HttpURLConnection).apply {
                     requestMethod = "PUT"
                     connectTimeout = 8000
@@ -100,13 +132,22 @@ actual object PlatformManager {
 
     actual fun fetchFromFirebase(
         familyCode: String,
+        familyPin: String,
         onResult: (Boolean, String?, String) -> Unit
     ) {
+        val cleanCode = sanitizeKey(familyCode).lowercase()
+        val cleanPin = sanitizeKey(familyPin)
+        if (cleanCode.isBlank() || cleanPin.isBlank()) {
+            onResult(false, null, "Nepřihlášeno")
+            return
+        }
+
         val mainHandler = Handler(Looper.getMainLooper())
         Thread {
             try {
-                val safeCode = URLEncoder.encode(familyCode.ifBlank { "terezka" }, "UTF-8")
-                val endpoint = URL("$FIREBASE_BASE/kocicky/$safeCode.json")
+                val encCode = URLEncoder.encode(cleanCode, "UTF-8")
+                val encPin = URLEncoder.encode(cleanPin, "UTF-8")
+                val endpoint = URL("$FIREBASE_BASE/kocicky/$encCode/$encPin.json")
                 val conn = (endpoint.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 8000

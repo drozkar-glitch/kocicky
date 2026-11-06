@@ -9,8 +9,21 @@ expect object PlatformManager {
     fun loadFamilyCode(): String
     fun saveFamilyCode(code: String)
 
-    fun syncToFirebase(familyCode: String, jsonPayload: String, onResult: (Boolean, String) -> Unit)
-    fun fetchFromFirebase(familyCode: String, onResult: (Boolean, String?, String) -> Unit)
+    fun loadFamilyPin(): String
+    fun saveFamilyPin(pin: String)
+
+    fun syncToFirebase(
+        familyCode: String,
+        familyPin: String,
+        jsonPayload: String,
+        onResult: (Boolean, String) -> Unit
+    )
+
+    fun fetchFromFirebase(
+        familyCode: String,
+        familyPin: String,
+        onResult: (Boolean, String?, String) -> Unit
+    )
 
     fun pickPhotoFromGallery(onPhotoSelected: (String?) -> Unit)
     fun decodeBase64ToBitmap(base64: String): ImageBitmap?
