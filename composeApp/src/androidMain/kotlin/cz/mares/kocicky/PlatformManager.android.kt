@@ -19,14 +19,16 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.util.Calendar
 
 actual object PlatformManager {
     private const val PREFS_NAME = "terezciny_kocicky_prefs"
-    private const val KEY_STATE_JSON = "cat_state_json"
-    private const val KEY_FAMILY_CODE = "family_code"
-    private const val KEY_FAMILY_PIN = "family_pin"
+    private const val KEY_STATE_JSON = "saved_cats_state_v1"
+    private const val KEY_STATE_JSON_FALLBACK = "cat_state_json"
+    private const val KEY_FAMILY_CODE = "saved_family_code_v2"
+    private const val KEY_FAMILY_CODE_FALLBACK = "family_code"
+    private const val KEY_FAMILY_PIN = "saved_family_pin_v2"
+    private const val KEY_FAMILY_PIN_FALLBACK = "family_pin"
     const val CHANNEL_ID = "terezka_kocicky_channel"
 
     private const val FIREBASE_BASE_URL =
@@ -70,43 +72,67 @@ actual object PlatformManager {
         val ctx = appContext ?: return null
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getString(KEY_STATE_JSON, null)
+            ?: prefs.getString(KEY_STATE_JSON_FALLBACK, null)
     }
 
     actual fun saveLocalData(json: String) {
         val ctx = appContext ?: return
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_STATE_JSON, json).apply()
+        prefs.edit()
+            .putString(KEY_STATE_JSON, json)
+            .putString(KEY_STATE_JSON_FALLBACK, json)
+            .apply()
     }
 
     actual fun loadFamilyCode(): String {
         val ctx = appContext ?: return ""
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_FAMILY_CODE, "") ?: ""
+        val primary = prefs.getString(KEY_FAMILY_CODE, "") ?: ""
+        if (primary.isNotBlank()) return primary
+        return prefs.getString(KEY_FAMILY_CODE_FALLBACK, "") ?: ""
     }
 
     actual fun saveFamilyCode(code: String) {
         val ctx = appContext ?: return
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_FAMILY_CODE, code).apply()
+        prefs.edit()
+            .putString(KEY_FAMILY_CODE, code)
+            .putString(KEY_FAMILY_CODE_FALLBACK, code)
+            .apply()
     }
 
     actual fun loadFamilyPin(): String {
         val ctx = appContext ?: return ""
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_FAMILY_PIN, "") ?: ""
+        val primary = prefs.getString(KEY_FAMILY_PIN, "") ?: ""
+        if (primary.isNotBlank()) return primary
+        return prefs.getString(KEY_FAMILY_PIN_FALLBACK, "") ?: ""
     }
 
     actual fun saveFamilyPin(pin: String) {
         val ctx = appContext ?: return
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_FAMILY_PIN, pin).apply()
+        prefs.edit()
+            .putString(KEY_FAMILY_PIN, pin)
+            .putString(KEY_FAMILY_PIN_FALLBACK, pin)
+            .apply()
+    }
+
+    private fun sanitizeKey(raw: String): String {
+        return raw.trim().lowercase()
+            .replace(".", "_")
+            .replace("#", "_")
+            .replace("$", "_")
+            .replace("[", "_")
+            .replace("]", "_")
+            .replace("/", "_")
+            .replace(" ", "_")
     }
 
     private fun buildFirebaseUrl(familyCode: String, familyPin: String): String {
-        val cleanCode = familyCode.trim().lowercase().replace(" ", "_")
-        val cleanPin = familyPin.trim().replace(" ", "_")
-        val encodedKey = URLEncoder.encode("${cleanCode}_${cleanPin}", "UTF-8")
-        return "$FIREBASE_BASE_URL/high_scores/kocicky_cloud/$encodedKey/payload.json"
+        val cleanCode = sanitizeKey(familyCode)
+        val cleanPin = sanitizeKey(familyPin)
+        return "$FIREBASE_BASE_URL/kocicky/$cleanCode/$cleanPin.json"
     }
 
     actual fun syncToFirebase(
@@ -116,13 +142,15 @@ actual object PlatformManager {
         onResult: (Boolean, String) -> Unit
     ) {
         val mainHandler = Handler(Looper.getMainLooper())
-        if (familyCode.isBlank() || familyPin.isBlank()) {
+        val cleanCode = sanitizeKey(familyCode)
+        val cleanPin = sanitizeKey(familyPin)
+        if (cleanCode.isBlank() || cleanPin.isBlank()) {
             mainHandler.post { onResult(false, "Chybí účet nebo PIN") }
             return
         }
         Thread {
             try {
-                val url = URL(buildFirebaseUrl(familyCode, familyPin))
+                val url = URL(buildFirebaseUrl(cleanCode, cleanPin))
                 val conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "PUT"
                     connectTimeout = 10000
@@ -155,13 +183,15 @@ actual object PlatformManager {
         onResult: (Boolean, String?, String) -> Unit
     ) {
         val mainHandler = Handler(Looper.getMainLooper())
-        if (familyCode.isBlank() || familyPin.isBlank()) {
+        val cleanCode = sanitizeKey(familyCode)
+        val cleanPin = sanitizeKey(familyPin)
+        if (cleanCode.isBlank() || cleanPin.isBlank()) {
             mainHandler.post { onResult(false, null, "Chybí účet nebo PIN") }
             return
         }
         Thread {
             try {
-                val url = URL(buildFirebaseUrl(familyCode, familyPin))
+                val url = URL(buildFirebaseUrl(cleanCode, cleanPin))
                 val conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 10000
