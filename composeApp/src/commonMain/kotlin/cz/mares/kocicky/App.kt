@@ -3,6 +3,7 @@ package cz.mares.kocicky
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -19,23 +20,47 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 
-// Baby Pink & Beige barevná paleta
-private val BgBeigeLight = Color(0xFFFDFBF7)
-private val BgBeigeWarm = Color(0xFFF5EBE6)
-private val BabyPinkSoft = Color(0xFFFADADD)
-private val BabyPinkCard = Color(0xFFFCEEF2)
-private val BabyPinkAccent = Color(0xFFE78FB3)
-private val BabyPinkDeep = Color(0xFFD46A92)
-private val CocoaBrown = Color(0xFF5C4033)
-private val CocoaMuted = Color(0xFF8C6D5E)
-private val MintSuccess = Color(0xFF529E72)
-private val SoftBorder = Color(0xFFF2D0DC)
+// Automatická barevná paleta podle systémového režimu Den / Noc (isSystemInDarkTheme)
+private val BgBeigeLight: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF1E171B) else Color(0xFFFDFBF7)
+
+private val BgBeigeWarm: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF2B2127) else Color(0xFFF5EBE6)
+
+private val BabyPinkSoft: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF3D2935) else Color(0xFFFADADD)
+
+private val BabyPinkCard: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF271E24) else Color(0xFFFCEEF2)
+
+private val BabyPinkAccent: Color
+    @Composable get() = Color(0xFFE78FB3)
+
+private val BabyPinkDeep: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFF49AC0) else Color(0xFFD46A92)
+
+private val CocoaBrown: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFF8EFEA) else Color(0xFF5C4033)
+
+private val CocoaMuted: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFC4B2AA) else Color(0xFF8C6D5E)
+
+private val MintSuccess: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF4CAF7A) else Color(0xFF529E72)
+
+private val SoftBorder: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF4A3742) else Color(0xFFF2D0DC)
+
+private val CompletedCardBg: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF1C2D24) else Color(0xFFF3FAF5)
 
 private enum class MainTab(val label: String, val icon: String) {
     PETS("Mazlíčci", "🐾"),
@@ -51,8 +76,21 @@ private data class PendingDeleteAction(
     val onConfirm: () -> Unit
 )
 
+private fun formatSyncTimestamp(epochMillis: Long, dateFallback: String): String {
+    if (epochMillis <= 0L) return dateFallback
+    // Převod UTC milisekund na středoevropský čas (CET/CEST +1h) pro čitelný čas HH:MM
+    val totalMinutes = (epochMillis / 60000L) + 60L
+    val minute = ((totalMinutes % 60L) + 60L) % 60L
+    val hour = (((totalMinutes / 60L) % 24L) + 24L) % 24L
+    val hh = hour.toString().padStart(2, '0')
+    val mm = minute.toString().padStart(2, '0')
+    return "$dateFallback v $hh:$mm"
+}
+
 @Composable
 fun App() {
+    val isDark = isSystemInDarkTheme()
+
     var appState by remember {
         val savedJson = PlatformManager.loadLocalData()
         val parsed = if (savedJson != null) CatDataSerializer.deserialize(savedJson) else null
@@ -69,6 +107,15 @@ fun App() {
                 "☁️ Připojování ($familyCode)..."
             } else {
                 "📱 Pouze v telefonu (nepřihlášeno)"
+            }
+        )
+    }
+    var lastSyncTimeText by remember {
+        mutableStateOf(
+            if (familyCode.isNotBlank() && familyPin.isNotBlank()) {
+                formatSyncTimestamp(appState.updatedAt, PlatformManager.currentDateString())
+            } else {
+                "Zatím nesynchronizováno"
             }
         )
     }
@@ -98,7 +145,9 @@ fun App() {
     var bannerMessage by remember { mutableStateOf<String?>(null) }
 
     fun persistAndSync(newState: CatAppState, toastMsg: String? = null) {
-        val stamped = newState.copy(updatedAt = PlatformManager.currentTimeMillis())
+        val nowMillis = PlatformManager.currentTimeMillis()
+        val nowDate = PlatformManager.currentDateString()
+        val stamped = newState.copy(updatedAt = nowMillis)
         appState = stamped
         val json = CatDataSerializer.serialize(stamped)
         PlatformManager.saveLocalData(json)
@@ -115,10 +164,11 @@ fun App() {
         syncStatusText = "☁️ Ukládám ($familyCode)..."
         PlatformManager.syncToFirebase(familyCode, familyPin, json) { ok, info ->
             isSyncing = false
-            syncStatusText = if (ok) {
-                "☁️ Synchronizováno ($familyCode)"
+            if (ok) {
+                syncStatusText = "☁️ Synchronizováno ($familyCode)"
+                lastSyncTimeText = formatSyncTimestamp(nowMillis, nowDate)
             } else {
-                "📱 V telefonu ($info)"
+                syncStatusText = "📱 V telefonu ($info)"
             }
         }
     }
@@ -180,6 +230,10 @@ fun App() {
                     PlatformManager.saveLocalData(CatDataSerializer.serialize(remoteState))
                     scheduleAllActiveNotifications(remoteState)
                     syncStatusText = "☁️ Synchronizováno ($targetCode)"
+                    lastSyncTimeText = formatSyncTimestamp(
+                        PlatformManager.currentTimeMillis(),
+                        PlatformManager.currentDateString()
+                    )
                     if (manualLogin) {
                         bannerMessage = "Data pro účet '$targetCode' byla úspěšně načtena ze serveru!"
                     }
@@ -207,7 +261,6 @@ fun App() {
         scheduleAllActiveNotifications(appState)
     }
 
-    // Filtrování mazlíčků podle volby v Nastavení (ALL / CAT / DOG)
     val visiblePets = remember(appState.cats, appState.preferredSpeciesMode) {
         when (appState.preferredSpeciesMode) {
             "CAT" -> appState.cats.filter { it.species == "CAT" }
@@ -238,26 +291,41 @@ fun App() {
         else -> "Zatím žádný mazlíček – přidej prvního 🐾"
     }
 
-    MaterialTheme(
-        colors = lightColors(
+    val themeColors = if (isDark) {
+        darkColors(
             primary = BabyPinkAccent,
             primaryVariant = BabyPinkDeep,
             secondary = BabyPinkSoft,
-            background = BgBeigeLight,
+            background = Color(0xFF151013),
+            surface = Color(0xFF221A1F),
+            onPrimary = Color.White,
+            onBackground = Color(0xFFF8EFEA),
+            onSurface = Color(0xFFF8EFEA)
+        )
+    } else {
+        lightColors(
+            primary = BabyPinkAccent,
+            primaryVariant = BabyPinkDeep,
+            secondary = BabyPinkSoft,
+            background = Color(0xFFFDFBF7),
             surface = Color.White,
             onPrimary = Color.White,
-            onBackground = CocoaBrown,
-            onSurface = CocoaBrown
+            onBackground = Color(0xFF5C4033),
+            onSurface = Color(0xFF5C4033)
         )
-    ) {
+    }
+
+    val bgGradient = if (isDark) {
+        listOf(Color(0xFF21181E), Color(0xFF161114), Color(0xFF1D161A))
+    } else {
+        listOf(Color(0xFFFADADD), Color(0xFFFDFBF7), Color(0xFFF5EBE6))
+    }
+
+    MaterialTheme(colors = themeColors) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(BabyPinkSoft, BgBeigeLight, BgBeigeWarm)
-                    )
-                )
+                .background(Brush.verticalGradient(colors = bgGradient))
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
             TopHeaderBar(
@@ -269,7 +337,7 @@ fun App() {
 
             if (bannerMessage != null) {
                 Card(
-                    backgroundColor = Color(0xFFFFF0F5),
+                    backgroundColor = BabyPinkCard,
                     shape = RoundedCornerShape(14.dp),
                     elevation = 2.dp,
                     modifier = Modifier
@@ -1024,6 +1092,7 @@ fun App() {
                 currentFamilyCode = familyCode,
                 currentFamilyPin = familyPin,
                 syncStatusText = syncStatusText,
+                lastSyncTimeText = lastSyncTimeText,
                 isSyncing = isSyncing,
                 onDismiss = { showSettingsDialog = false },
                 onChangeSpeciesMode = { newMode ->
@@ -1087,6 +1156,7 @@ fun App() {
                     PlatformManager.saveFamilyCode("")
                     PlatformManager.saveFamilyPin("")
                     syncStatusText = "📱 Pouze v telefonu (nepřihlášeno)"
+                    lastSyncTimeText = "Odpojeno"
                     showSettingsDialog = false
                     bannerMessage = "Server byl odpojen. Data zůstávají bezpečně v telefonu."
                 }
@@ -1102,6 +1172,10 @@ private fun TopHeaderBar(
     pendingMedsToday: Int,
     onOpenSettings: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+    val donePillBg = if (isDark) Color(0xFF1F382B) else Color(0xFFE6F6EC)
+    val pendingPillBg = if (isDark) Color(0xFF3E2430) else Color(0xFFFFE4EC)
+
     Surface(
         color = BabyPinkCard,
         elevation = 3.dp,
@@ -1148,11 +1222,7 @@ private fun TopHeaderBar(
             } else {
                 "🥣 $pendingFoodsToday • 💊 $pendingMedsToday"
             }
-            val pillColor = if (pendingFoodsToday == 0 && pendingMedsToday == 0) {
-                Color(0xFFE6F6EC)
-            } else {
-                Color(0xFFFFE4EC)
-            }
+            val pillColor = if (pendingFoodsToday == 0 && pendingMedsToday == 0) donePillBg else pendingPillBg
 
             Box(
                 modifier = Modifier
@@ -1458,7 +1528,6 @@ private fun CatsTabScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Proužek s nejbližší návštěvou veterináře / očkováním
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1675,7 +1744,6 @@ private fun StatusAndLogsTabScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
-        // Sekce 1: Graf vývoje váhy a kondice
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -1702,7 +1770,6 @@ private fun StatusAndLogsTabScreen(
             )
         }
 
-        // Sekce 2: Plánované návštěvy lékaře a očkování
         item {
             Spacer(modifier = Modifier.height(4.dp))
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -1740,7 +1807,7 @@ private fun StatusAndLogsTabScreen(
 
         items(vetVisits) { visit ->
             Card(
-                backgroundColor = if (visit.isCompleted) Color(0xFFF3FAF5) else BgBeigeLight,
+                backgroundColor = if (visit.isCompleted) CompletedCardBg else BgBeigeLight,
                 shape = RoundedCornerShape(18.dp),
                 elevation = 3.dp,
                 modifier = Modifier
@@ -1888,7 +1955,6 @@ private fun StatusAndLogsTabScreen(
             }
         }
 
-        // Sekce 3: Rychlé přepnutí denního stavu
         item {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -2014,7 +2080,6 @@ private fun StatusAndLogsTabScreen(
             }
         }
 
-        // Sekce 4: Historie a deníček zdraví
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -2161,7 +2226,7 @@ private fun FoodTabScreen(
             val fedToday = food.lastFedDate == todayStr
 
             Card(
-                backgroundColor = if (fedToday) Color(0xFFF3FAF5) else BgBeigeLight,
+                backgroundColor = if (fedToday) CompletedCardBg else BgBeigeLight,
                 shape = RoundedCornerShape(18.dp),
                 elevation = 3.dp,
                 modifier = Modifier
@@ -2399,7 +2464,7 @@ private fun MedicationsTabScreen(
             val givenToday = med.lastGivenDate == todayStr
 
             Card(
-                backgroundColor = if (givenToday) Color(0xFFF3FAF5) else BgBeigeLight,
+                backgroundColor = if (givenToday) CompletedCardBg else BgBeigeLight,
                 shape = RoundedCornerShape(18.dp),
                 elevation = 3.dp,
                 modifier = Modifier
@@ -3116,7 +3181,7 @@ private fun EditCatDialog(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFFFFE4EC))
+                            .background(BabyPinkSoft)
                             .border(1.dp, BabyPinkDeep, RoundedCornerShape(10.dp))
                             .clickable { onRequestDelete(cat) }
                             .padding(horizontal = 9.dp, vertical = 5.dp)
@@ -3131,7 +3196,6 @@ private fun EditCatDialog(
                 }
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Přepínač druhu: Kočka / Pes
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -3163,7 +3227,6 @@ private fun EditCatDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Živý náhled avatara a přepnutí Vlastní fotka vs. Ilustrace
                 Card(
                     backgroundColor = BabyPinkCard,
                     shape = RoundedCornerShape(14.dp),
@@ -3588,7 +3651,6 @@ private fun AddCatDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Volba Kočka vs. Pes
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -4503,6 +4565,7 @@ private fun SettingsAndSyncDialog(
     currentFamilyCode: String,
     currentFamilyPin: String,
     syncStatusText: String,
+    lastSyncTimeText: String,
     isSyncing: Boolean,
     onDismiss: () -> Unit,
     onChangeSpeciesMode: (String) -> Unit,
@@ -4513,6 +4576,11 @@ private fun SettingsAndSyncDialog(
     onRefreshNow: () -> Unit,
     onDisconnectCloud: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+    val isLogged = currentFamilyCode.isNotBlank() && currentFamilyPin.isNotBlank()
+    var isEditingCredentials by remember { mutableStateOf(!isLogged) }
+    var showPinPlain by remember { mutableStateOf(false) }
+
     var codeInput by remember { mutableStateOf(currentFamilyCode) }
     var pinInput by remember { mutableStateOf(currentFamilyPin) }
     val normalizedMode = if (currentSpeciesMode == "CAT" || currentSpeciesMode == "DOG") currentSpeciesMode else "ALL"
@@ -4524,246 +4592,370 @@ private fun SettingsAndSyncDialog(
             elevation = 8.dp,
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 620.dp)
                 .border(2.dp, BabyPinkAccent, RoundedCornerShape(22.dp))
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Ukotvená horní hlavička okna
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BabyPinkCard)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "⚙️ Nastavení a synchronizace",
-                        color = CocoaBrown,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = "✕",
-                        color = CocoaMuted,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "⚙️ Nastavení a synchronizace",
+                            color = CocoaBrown,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = if (isDark) "🌙 Tmavý režim (podle systému)" else "☀️ Světlý režim (podle systému)",
+                            color = CocoaMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Box(
                         modifier = Modifier
-                            .clickable { onDismiss() }
-                            .padding(4.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 1. Volba zobrazených zvířátek
-                Text(
-                    text = "🐾 Zobrazení mazlíčků v aplikaci:",
-                    color = CocoaBrown,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    listOf(
-                        "ALL" to "🐾 Všichni",
-                        "CAT" to "🐱 Kočičky",
-                        "DOG" to "🐶 Pejsci"
-                    ).forEach { (mKey, mLabel) ->
-                        val sel = normalizedMode == mKey
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (sel) BabyPinkAccent else BabyPinkCard)
-                                .border(1.dp, if (sel) BabyPinkDeep else SoftBorder, RoundedCornerShape(10.dp))
-                                .clickable { onChangeSpeciesMode(mKey) }
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = mLabel,
-                                color = if (sel) Color.White else CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                        }
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(BgBeigeLight)
+                            .border(1.dp, SoftBorder, CircleShape)
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "✕",
+                            color = CocoaBrown,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
                 Divider(color = SoftBorder)
-                Spacer(modifier = Modifier.height(10.dp))
 
-                // 2. Rychlá správa mazlíčků
-                Text(
-                    text = "📋 Správa mazlíčků (rasa, fotka, pojištění):",
-                    color = CocoaBrown,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                cats.forEach { pet ->
+                // Posuvný střed okna
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp)
+                ) {
+                    // 1. Volba zobrazených zvířátek
+                    Text(
+                        text = "🐾 Zobrazení mazlíčků v aplikaci:",
+                        color = CocoaBrown,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(BabyPinkCard)
-                            .border(1.dp, SoftBorder, RoundedCornerShape(10.dp))
-                            .clickable { onEditPetFromSettings(pet) }
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            "ALL" to "🐾 Všichni",
+                            "CAT" to "🐱 Kočičky",
+                            "DOG" to "🐶 Pejsci"
+                        ).forEach { (mKey, mLabel) ->
+                            val sel = normalizedMode == mKey
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (sel) BabyPinkAccent else BabyPinkCard)
+                                    .border(1.dp, if (sel) BabyPinkDeep else SoftBorder, RoundedCornerShape(10.dp))
+                                    .clickable { onChangeSpeciesMode(mKey) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = mLabel,
+                                    color = if (sel) Color.White else CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Divider(color = SoftBorder)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 2. Rychlá správa mazlíčků
+                    Text(
+                        text = "📋 Správa mazlíčků (rasa, fotka, pojištění):",
+                        color = CocoaBrown,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    cats.forEach { pet ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(BabyPinkCard)
+                                .border(1.dp, SoftBorder, RoundedCornerShape(10.dp))
+                                .clickable { onEditPetFromSettings(pet) }
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${if (pet.species == "DOG") "🐶" else "🐱"} ${pet.name} (${pet.breed} • ${pet.weightKg} kg)",
+                                color = CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "✏️ Upravit",
+                                color = BabyPinkDeep,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = onAddPetFromSettings,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "${if (pet.species == "DOG") "🐶" else "🐱"} ${pet.name} (${pet.breed} • ${pet.weightKg} kg)",
-                            color = CocoaBrown,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = "✏️ Upravit",
+                            text = "+ Přidat nového mazlíčka (kočičku nebo pejska)",
                             color = BabyPinkDeep,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedButton(
-                    onClick = onAddPetFromSettings,
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Divider(color = SoftBorder)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 3. Synchronizace a záloha na server (Firebase)
                     Text(
-                        text = "+ Přidat nového mazlíčka (kočičku nebo pejska)",
-                        color = BabyPinkDeep,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Divider(color = SoftBorder)
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 3. Synchronizace a záloha na server (Firebase)
-                Text(
-                    text = "☁️ Synchronizace a záloha (Firebase)",
-                    color = CocoaBrown,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Zadej váš Rodinný účet (např. terezka) a vaše tajné Rodinné heslo / PIN. Při výměně telefonu stačí zadat stejné údaje a data se obnoví.",
-                    color = CocoaMuted,
-                    fontSize = 11.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Stav: $syncStatusText",
-                    color = CocoaBrown,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = codeInput,
-                    onValueChange = { codeInput = it },
-                    label = { Text("Rodinný účet (např. terezka)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                OutlinedTextField(
-                    value = pinInput,
-                    onValueChange = { pinInput = it },
-                    label = { Text("Rodinné heslo / PIN") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Button(
-                    onClick = { onLoginAndDownload(codeInput, pinInput) },
-                    enabled = !isSyncing,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "⬇️ Přihlásit a stáhnout ze serveru",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Button(
-                    onClick = { onSaveAndUpload(codeInput, pinInput) },
-                    enabled = !isSyncing,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkSoft),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "⬆️ Založit / Nahrát tento telefon",
+                        text = "☁️ Synchronizace a záloha (Firebase)",
                         color = CocoaBrown,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
-                }
-
-                if (currentFamilyCode.isNotBlank() && currentFamilyPin.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedButton(
-                        onClick = onRefreshNow,
-                        enabled = !isSyncing,
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
-                        modifier = Modifier.fillMaxWidth()
+
+                    // Přehledová karta stavu a času poslední synchronizace
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(BabyPinkCard)
+                            .border(1.dp, SoftBorder, RoundedCornerShape(12.dp))
+                            .padding(10.dp)
                     ) {
                         Text(
-                            text = "🔄 Obnovit data ze serveru",
+                            text = "Stav: $syncStatusText",
                             color = CocoaBrown,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "🕒 Naposledy: $lastSyncTimeText",
+                            color = CocoaMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        if (isLogged && !isEditingCredentials) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "🔐 Účet: $currentFamilyCode  •  PIN: ••••••",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "✏️ Změnit",
+                                    color = BabyPinkDeep,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { isEditingCredentials = true }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (isLogged && !isEditingCredentials) {
+                        // Kompaktní tlačítka pro již připojený účet
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onRefreshNow,
+                                enabled = !isSyncing,
+                                colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "🔄 Stáhnout",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+
+                            Button(
+                                onClick = { onSaveAndUpload(currentFamilyCode, currentFamilyPin) },
+                                enabled = !isSyncing,
+                                colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkSoft),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "⬆️ Nahrát",
+                                    color = CocoaBrown,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    } else {
+                        // Zadávací formulář pro přihlášení nebo změnu účtu/PINu
+                        Text(
+                            text = "Zadej váš Rodinný účet (např. terezka) a tajné Rodinné heslo / PIN:",
+                            color = CocoaMuted,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        OutlinedTextField(
+                            value = codeInput,
+                            onValueChange = { codeInput = it },
+                            label = { Text("Rodinný účet (např. terezka)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        OutlinedTextField(
+                            value = pinInput,
+                            onValueChange = { pinInput = it },
+                            label = { Text("Rodinné heslo / PIN") },
+                            singleLine = true,
+                            visualTransformation = if (showPinPlain) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                Text(
+                                    text = if (showPinPlain) "🙈" else "👁️",
+                                    fontSize = 16.sp,
+                                    modifier = Modifier
+                                        .clickable { showPinPlain = !showPinPlain }
+                                        .padding(6.dp)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Button(
+                            onClick = { onLoginAndDownload(codeInput, pinInput) },
+                            enabled = !isSyncing,
+                            colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "⬇️ Přihlásit a stáhnout ze serveru",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Button(
+                            onClick = { onSaveAndUpload(codeInput, pinInput) },
+                            enabled = !isSyncing,
+                            colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkSoft),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "⬆️ Založit / Nahrát tento telefon",
+                                color = CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        if (isLogged) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            TextButton(
+                                onClick = {
+                                    codeInput = currentFamilyCode
+                                    pinInput = currentFamilyPin
+                                    isEditingCredentials = false
+                                },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("Zrušit úpravu účtu", color = CocoaMuted, fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                // Ukotvená spodní patička okna
+                Divider(color = SoftBorder)
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BabyPinkCard)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (currentFamilyCode.isNotBlank() || currentFamilyPin.isNotBlank()) {
+                    if (isLogged) {
                         TextButton(onClick = onDisconnectCloud) {
-                            Text("🔌 Odpojit server", color = BabyPinkDeep, fontSize = 12.sp)
+                            Text("🔌 Odpojit server", color = BabyPinkDeep, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     } else {
                         Spacer(modifier = Modifier.width(8.dp))
                     }
 
                     TextButton(onClick = onDismiss) {
-                        Text("Zavřít", color = CocoaMuted, fontWeight = FontWeight.Bold)
+                        Text("Zavřít", color = CocoaBrown, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }

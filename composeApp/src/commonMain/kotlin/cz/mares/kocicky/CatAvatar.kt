@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,9 @@ fun CatAvatar(
     size: Dp = 84.dp,
     modifier: Modifier = Modifier
 ) {
+    val isDark = isSystemInDarkTheme()
+    val avatarBg = if (isDark) Color(0xFF2E2229) else Color(0xFFFCEEF2)
+
     val decodedBitmap = remember(cat.photoBase64) {
         if (cat.photoBase64.isNotBlank()) {
             PlatformManager.decodeBase64ToBitmap(cat.photoBase64)
@@ -48,7 +52,7 @@ fun CatAvatar(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .background(Color(0xFFFCEEF2))
+            .background(avatarBg)
             .border(2.5.dp, Color(0xFFE78FB3), CircleShape),
         contentAlignment = Alignment.Center
     ) {
@@ -65,9 +69,8 @@ fun CatAvatar(
                 val h = this.size.height
 
                 if (cat.species == "DOG" || cat.breedType.startsWith("DOG")) {
-                    // Kreslená ilustrace pejska podle rasy/velikosti
                     drawCircle(
-                        color = Color(0xFFF7E6DC),
+                        color = if (isDark) Color(0xFF382B26) else Color(0xFFF7E6DC),
                         radius = w * 0.48f,
                         center = Offset(w * 0.5f, h * 0.5f)
                     )
@@ -83,7 +86,6 @@ fun CatAvatar(
                         else -> Color(0xFF8C583A)
                     }
 
-                    // Klapací psí ouška po stranách
                     drawOval(
                         color = earColor,
                         topLeft = Offset(w * 0.10f, h * 0.25f),
@@ -95,21 +97,18 @@ fun CatAvatar(
                         size = Size(w * 0.22f, h * 0.42f)
                     )
 
-                    // Hlavička pejska
                     drawCircle(
                         color = furMain,
                         radius = w * 0.31f,
                         center = Offset(w * 0.5f, h * 0.50f)
                     )
 
-                    // Světlý čumáček / náprsenka
                     drawOval(
                         color = Color(0xFFFFF5EB),
                         topLeft = Offset(w * 0.32f, h * 0.48f),
                         size = Size(w * 0.36f, h * 0.26f)
                     )
 
-                    // Očička pejska
                     drawCircle(
                         color = Color(0xFF3B2314),
                         radius = w * 0.048f,
@@ -131,7 +130,6 @@ fun CatAvatar(
                         center = Offset(w * 0.605f, h * 0.425f)
                     )
 
-                    // Černý psí čumák
                     drawRoundRect(
                         color = Color(0xFF2D1E17),
                         topLeft = Offset(w * 0.43f, h * 0.52f),
@@ -139,14 +137,12 @@ fun CatAvatar(
                         cornerRadius = CornerRadius(12f, 12f)
                     )
 
-                    // Veselý růžový jazýček
                     drawOval(
                         color = Color(0xFFF28B9C),
                         topLeft = Offset(w * 0.46f, h * 0.62f),
                         size = Size(w * 0.08f, h * 0.11f)
                     )
 
-                    // Obojek se známkou
                     drawRoundRect(
                         color = Color(0xFFE78FB3),
                         topLeft = Offset(w * 0.30f, h * 0.76f),
@@ -159,12 +155,11 @@ fun CatAvatar(
                         center = Offset(w * 0.50f, h * 0.84f)
                     )
                 } else {
-                    // Kreslená ilustrace kočičky podle rasy
                     val isRagdoll = cat.breedType == "RAGDOLL"
                     val isMaineCoon = cat.breedType == "MAINE_COON"
 
                     drawCircle(
-                        color = if (isRagdoll) Color(0xFFFDF6F0) else Color(0xFFF9E8DF),
+                        color = if (isDark) Color(0xFF362A31) else if (isRagdoll) Color(0xFFFDF6F0) else Color(0xFFF9E8DF),
                         radius = w * 0.48f,
                         center = Offset(w * 0.5f, h * 0.5f)
                     )
@@ -180,7 +175,6 @@ fun CatAvatar(
                         else -> Color(0xFFC89D84)
                     }
 
-                    // Špičatá kočičí ouška
                     val leftEar = Path().apply {
                         moveTo(w * 0.22f, h * 0.42f)
                         lineTo(w * 0.18f, h * 0.14f)
@@ -201,14 +195,12 @@ fun CatAvatar(
                         drawCircle(color = earOuterColor, radius = w * 0.03f, center = Offset(w * 0.82f, h * 0.12f))
                     }
 
-                    // Hlavička kočičky
                     drawCircle(
                         color = headColor,
                         radius = w * 0.31f,
                         center = Offset(w * 0.5f, h * 0.54f)
                     )
 
-                    // Očička
                     val eyeColor = if (isRagdoll) Color(0xFF4A90E2) else Color(0xFF689F38)
                     drawCircle(
                         color = eyeColor,
@@ -231,7 +223,6 @@ fun CatAvatar(
                         center = Offset(w * 0.605f, h * 0.485f)
                     )
 
-                    // Růžový čumáček
                     drawCircle(
                         color = Color(0xFFE78FB3),
                         radius = w * 0.032f,
@@ -251,6 +242,16 @@ fun PetWeightAndVitalityChart(
     onDeleteWeightRecord: (WeightRecord) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = isSystemInDarkTheme()
+    val cardBg = if (isDark) Color(0xFF221A1F) else Color(0xFFFDFBF7)
+    val chartBoxBg = if (isDark) Color(0xFF2B2027) else Color(0xFFFCEEF2)
+    val rowItemBg = if (isDark) Color(0xFF33272F) else Color(0xFFF5EBE6)
+    val borderCol = if (isDark) Color(0xFF4A3742) else Color(0xFFF2D0DC)
+    val textPrimary = if (isDark) Color(0xFFF8EFEA) else Color(0xFF5C4033)
+    val textMuted = if (isDark) Color(0xFFC4B2AA) else Color(0xFF8C6D5E)
+    val accentPink = Color(0xFFE78FB3)
+    val deepPink = if (isDark) Color(0xFFF49AC0) else Color(0xFFD46A92)
+
     var showHistoryList by remember { mutableStateOf(false) }
 
     val displayRecords = remember(records, cat.weightKg, cat.lastCheckedDate) {
@@ -277,12 +278,12 @@ fun PetWeightAndVitalityChart(
     val weightDiff = if (prevWeight != null) latestWeight - prevWeight else null
 
     Card(
-        backgroundColor = Color(0xFFFDFBF7),
+        backgroundColor = cardBg,
         shape = RoundedCornerShape(18.dp),
         elevation = 3.dp,
         modifier = modifier
             .fillMaxWidth()
-            .border(1.5.dp, Color(0xFFF2D0DC), RoundedCornerShape(18.dp))
+            .border(1.5.dp, borderCol, RoundedCornerShape(18.dp))
     ) {
         Column(modifier = Modifier.padding(13.dp)) {
             Row(
@@ -299,7 +300,7 @@ fun PetWeightAndVitalityChart(
                     Column {
                         Text(
                             text = "📊 ${cat.name} – Váha a kondice",
-                            color = Color(0xFF5C4033),
+                            color = textPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.ExtraBold,
                             maxLines = 1,
@@ -311,7 +312,7 @@ fun PetWeightAndVitalityChart(
                         ) {
                             Text(
                                 text = "Aktuálně: ${WeightFormatHelper.formatWeight(latestWeight)} kg",
-                                color = Color(0xFFD46A92),
+                                color = deepPink,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -319,12 +320,12 @@ fun PetWeightAndVitalityChart(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFFFCEEF2))
+                                        .background(chartBoxBg)
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
                                     Text(
                                         text = WeightFormatHelper.formatDiff(weightDiff),
-                                        color = Color(0xFF5C4033),
+                                        color = textPrimary,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -337,7 +338,7 @@ fun PetWeightAndVitalityChart(
                 Button(
                     onClick = onAddWeightClick,
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFFE78FB3),
+                        backgroundColor = accentPink,
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(10.dp),
@@ -354,16 +355,14 @@ fun PetWeightAndVitalityChart(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Oblast grafu
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFFCEEF2))
-                    .border(1.dp, Color(0xFFF2D0DC), RoundedCornerShape(14.dp))
+                    .background(chartBoxBg)
+                    .border(1.dp, borderCol, RoundedCornerShape(14.dp))
                     .padding(horizontal = 8.dp, vertical = 10.dp)
             ) {
-                // Horní popisky hodnot (kg) nad jednotlivými body
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -376,7 +375,7 @@ fun PetWeightAndVitalityChart(
                         ) {
                             Text(
                                 text = "${WeightFormatHelper.formatWeight(rec.weightKg)} kg",
-                                color = if (isLast) Color(0xFFD46A92) else Color(0xFF5C4033),
+                                color = if (isLast) deepPink else textPrimary,
                                 fontSize = 10.sp,
                                 fontWeight = if (isLast) FontWeight.ExtraBold else FontWeight.SemiBold,
                                 maxLines = 1,
@@ -388,7 +387,6 @@ fun PetWeightAndVitalityChart(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Samotné plátno s křivkou, mřížkou a body
                 Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -405,11 +403,10 @@ fun PetWeightAndVitalityChart(
                     val botPad = h * 0.14f
                     val usableH = (h - topPad - botPad).coerceAtLeast(10f)
 
-                    // 3 vodorovné pomocné linky mřížky
                     for (g in 0..2) {
                         val gy = topPad + usableH * (g / 2f)
                         drawLine(
-                            color = Color(0xFFF2D0DC),
+                            color = borderCol,
                             start = Offset(0f, gy),
                             end = Offset(w, gy),
                             strokeWidth = 1.dp.toPx()
@@ -434,8 +431,8 @@ fun PetWeightAndVitalityChart(
                             path = fillPath,
                             brush = Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0xFFE78FB3).copy(alpha = 0.35f),
-                                    Color(0xFFE78FB3).copy(alpha = 0.04f)
+                                    accentPink.copy(alpha = 0.35f),
+                                    accentPink.copy(alpha = 0.04f)
                                 ),
                                 startY = topPad,
                                 endY = h - botPad
@@ -450,7 +447,7 @@ fun PetWeightAndVitalityChart(
                         }
                         drawPath(
                             path = linePath,
-                            color = Color(0xFFD46A92),
+                            color = deepPink,
                             style = Stroke(
                                 width = 3.dp.toPx(),
                                 cap = StrokeCap.Round,
@@ -462,12 +459,12 @@ fun PetWeightAndVitalityChart(
                     points.forEachIndexed { idx, pt ->
                         val isLast = idx == points.lastIndex
                         drawCircle(
-                            color = Color.White,
+                            color = if (isDark) Color(0xFF181316) else Color.White,
                             radius = if (isLast) 6.5.dp.toPx() else 5.dp.toPx(),
                             center = pt
                         )
                         drawCircle(
-                            color = if (isLast) Color(0xFFD46A92) else Color(0xFFE78FB3),
+                            color = if (isLast) deepPink else accentPink,
                             radius = if (isLast) 4.5.dp.toPx() else 3.2.dp.toPx(),
                             center = pt
                         )
@@ -476,7 +473,6 @@ fun PetWeightAndVitalityChart(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Spodní popisky dat (DD. M.)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -488,7 +484,7 @@ fun PetWeightAndVitalityChart(
                         ) {
                             Text(
                                 text = WeightFormatHelper.shortDateLabel(rec.dateText),
-                                color = Color(0xFF8C6D5E),
+                                color = textMuted,
                                 fontSize = 9.sp,
                                 maxLines = 1,
                                 textAlign = TextAlign.Center
@@ -500,7 +496,6 @@ fun PetWeightAndVitalityChart(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Proužek vitality a přepínač historie vážení
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -508,7 +503,7 @@ fun PetWeightAndVitalityChart(
             ) {
                 Text(
                     text = "💖 Vitalita: ${cat.energyLevel} %  •  ${cat.mood}",
-                    color = Color(0xFF5C4033),
+                    color = textPrimary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
@@ -516,7 +511,7 @@ fun PetWeightAndVitalityChart(
 
                 Text(
                     text = if (showHistoryList) "Skrýt historii ▲" else "Historie vážení (${records.size}) ▼",
-                    color = Color(0xFFD46A92),
+                    color = deepPink,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
@@ -534,7 +529,7 @@ fun PetWeightAndVitalityChart(
                             .fillMaxWidth()
                             .padding(vertical = 2.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFFF5EBE6))
+                            .background(rowItemBg)
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -542,7 +537,7 @@ fun PetWeightAndVitalityChart(
                         Text(
                             text = "📅 ${rec.dateText}  •  ${WeightFormatHelper.formatWeight(rec.weightKg)} kg" +
                                     if (rec.note.isNotBlank()) " (${rec.note})" else "",
-                            color = Color(0xFF5C4033),
+                            color = textPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.weight(1f)
