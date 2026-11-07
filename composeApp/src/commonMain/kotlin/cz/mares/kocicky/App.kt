@@ -79,6 +79,9 @@ fun App() {
     var showMedDialog by remember { mutableStateOf(false) }
     var editingMed by remember { mutableStateOf<MedicationItem?>(null) }
 
+    var showVetDialog by remember { mutableStateOf(false) }
+    var editingVetVisit by remember { mutableStateOf<VetVisitItem?>(null) }
+
     var showAddHealthLogDialog by remember { mutableStateOf(false) }
     var showCloudDialog by remember { mutableStateOf(false) }
     var bannerMessage by remember { mutableStateOf<String?>(null) }
@@ -129,6 +132,17 @@ fun App() {
                     medName = "🥣 Krmení: ${food.name}",
                     dosage = food.portion,
                     timeHhMm = food.timeOfDay
+                )
+            }
+        }
+        state.vetVisits.forEach { visit ->
+            if (visit.notificationsEnabled && !visit.isCompleted) {
+                PlatformManager.scheduleMedicationNotification(
+                    id = visit.id,
+                    catName = visit.catName,
+                    medName = "🩺 Veterina (${visit.dateText}): ${visit.title}",
+                    dosage = visit.notes.ifBlank { "Kontrola u veterináře" },
+                    timeHhMm = visit.timeOfDay
                 )
             }
         }
@@ -193,6 +207,7 @@ fun App() {
     val todayStr = PlatformManager.currentDateString()
     val pendingFoodsToday = appState.foods.count { it.lastFedDate != todayStr }
     val pendingMedsToday = appState.medications.count { it.lastGivenDate != todayStr }
+    val pendingVetCount = appState.vetVisits.count { !it.isCompleted }
 
     MaterialTheme(
         colors = lightColors(
@@ -270,6 +285,7 @@ fun App() {
                         cats = appState.cats.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
                         foods = appState.foods,
                         medications = appState.medications,
+                        vetVisits = appState.vetVisits,
                         todayStr = todayStr,
                         familyCode = familyCode,
                         isCloudLogged = isCloudLogged,
@@ -310,6 +326,7 @@ fun App() {
                         },
                         onEditCat = { editingCat = it },
                         onAddCat = { showAddCatDialog = true },
+                        onOpenVetSection = { activeTab = MainTab.STATUS },
                         onOpenCloudSettings = { showCloudDialog = true },
                         onRefreshCloud = {
                             if (isCloudLogged) {
@@ -322,6 +339,7 @@ fun App() {
 
                     MainTab.STATUS -> StatusAndLogsTabScreen(
                         cats = appState.cats.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
+                        vetVisits = appState.vetVisits.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
                         logs = appState.healthLogs.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
                         onQuickUpdateCat = { updatedCat, logText ->
                             val newCats = appState.cats.map { if (it.id == updatedCat.id) updatedCat else it }
@@ -340,6 +358,72 @@ fun App() {
                                     healthLogs = listOf(newLog) + appState.healthLogs
                                 ),
                                 "Stav kočičky ${updatedCat.name} byl uložen!"
+                            )
+                        },
+                        onAddVetVisitClick = {
+                            editingVetVisit = null
+                            showVetDialog = true
+                        },
+                        onEditVetVisit = { visit ->
+                            editingVetVisit = visit
+                            showVetDialog = true
+                        },
+                        onCompleteVetVisit = { visit ->
+                            PlatformManager.cancelMedicationNotification(visit.id)
+                            val updatedVisits = appState.vetVisits.map {
+                                if (it.id == visit.id) it.copy(isCompleted = true, notificationsEnabled = false) else it
+                            }
+                            val newLog = HealthLogItem(
+                                id = "log_${PlatformManager.currentTimeMillis()}",
+                                catId = visit.catId,
+                                catName = visit.catName,
+                                dateText = todayStr,
+                                title = "Veterina / Očkování splněno: ${visit.title} 🩺",
+                                detail = "Termín: ${visit.dateText}. ${visit.notes}",
+                                category = "Veterina"
+                            )
+                            val newNotif = AppNotificationItem(
+                                id = "notif_${PlatformManager.currentTimeMillis()}",
+                                title = "🩺 Hotovo: ${visit.title} (${visit.catName})",
+                                message = "Návštěva lékaře / očkování byla označena jako splněná a zapsána do deníčku.",
+                                timeText = todayStr,
+                                isRead = false
+                            )
+                            persistAndSync(
+                                appState.copy(
+                                    vetVisits = updatedVisits,
+                                    healthLogs = listOf(newLog) + appState.healthLogs,
+                                    notifications = listOf(newNotif) + appState.notifications
+                                ),
+                                "Návštěva lékaře pro ${visit.catName} byla splněna a zapsána do deníčku!"
+                            )
+                        },
+                        onToggleVetNotification = { visit ->
+                            val nextEnabled = !visit.notificationsEnabled
+                            if (nextEnabled && !visit.isCompleted) {
+                                PlatformManager.scheduleMedicationNotification(
+                                    id = visit.id,
+                                    catName = visit.catName,
+                                    medName = "🩺 Veterina (${visit.dateText}): ${visit.title}",
+                                    dosage = visit.notes.ifBlank { "Kontrola u veterináře" },
+                                    timeHhMm = visit.timeOfDay
+                                )
+                            } else {
+                                PlatformManager.cancelMedicationNotification(visit.id)
+                            }
+                            val updatedVisits = appState.vetVisits.map {
+                                if (it.id == visit.id) it.copy(notificationsEnabled = nextEnabled) else it
+                            }
+                            persistAndSync(
+                                appState.copy(vetVisits = updatedVisits),
+                                if (nextEnabled) "Upozornění na veterinu zapnuto 🔔" else "Upozornění vypnuto 🔕"
+                            )
+                        },
+                        onDeleteVetVisit = { visit ->
+                            PlatformManager.cancelMedicationNotification(visit.id)
+                            persistAndSync(
+                                appState.copy(vetVisits = appState.vetVisits.filterNot { it.id == visit.id }),
+                                "Termín u lékaře byl odstraněn."
                             )
                         },
                         onAddHealthLog = { showAddHealthLogDialog = true },
@@ -517,11 +601,12 @@ fun App() {
                     MainTab.ALERTS -> NotificationsTabScreen(
                         foods = appState.foods,
                         medications = appState.medications,
+                        vetVisits = appState.vetVisits,
                         notifications = appState.notifications,
                         onTestSystemNotification = {
                             PlatformManager.sendImmediateTestNotification(
                                 title = "🐾 Terezčiny Kočičky – Safírka & Zlatín",
-                                message = "Připomínka: Nezapomeň zkontrolovat misky, vodu a dnešní vitamíny! 💕"
+                                message = "Připomínka: Nezapomeň zkontrolovat misky, vodu, léky a termíny očkování! 💕"
                             )
                             val testItem = AppNotificationItem(
                                 id = "notif_${PlatformManager.currentTimeMillis()}",
@@ -545,6 +630,7 @@ fun App() {
 
             BottomNavigationAndFooter(
                 activeTab = activeTab,
+                pendingVetCount = pendingVetCount,
                 pendingFoodsCount = pendingFoodsToday,
                 pendingMedsCount = pendingMedsToday,
                 unreadNotifCount = unreadNotifCount,
@@ -653,6 +739,45 @@ fun App() {
                     persistAndSync(
                         appState.copy(medications = updatedMeds),
                         if (isEdit) "Lék ${savedMed.name} byl upraven!" else "Přidán lék ${savedMed.name} pro ${savedMed.catName}!"
+                    )
+                }
+            )
+        }
+
+        if (showVetDialog) {
+            AddOrEditVetVisitDialog(
+                cats = appState.cats,
+                initialVisit = editingVetVisit,
+                onDismiss = {
+                    showVetDialog = false
+                    editingVetVisit = null
+                },
+                onSave = { savedVisit ->
+                    val isEdit = editingVetVisit != null
+                    showVetDialog = false
+                    editingVetVisit = null
+
+                    if (savedVisit.notificationsEnabled && !savedVisit.isCompleted) {
+                        PlatformManager.scheduleMedicationNotification(
+                            id = savedVisit.id,
+                            catName = savedVisit.catName,
+                            medName = "🩺 Veterina (${savedVisit.dateText}): ${savedVisit.title}",
+                            dosage = savedVisit.notes.ifBlank { "Kontrola u veterináře" },
+                            timeHhMm = savedVisit.timeOfDay
+                        )
+                    } else {
+                        PlatformManager.cancelMedicationNotification(savedVisit.id)
+                    }
+
+                    val updatedVisits = if (isEdit) {
+                        appState.vetVisits.map { if (it.id == savedVisit.id) savedVisit else it }
+                    } else {
+                        listOf(savedVisit) + appState.vetVisits
+                    }
+
+                    persistAndSync(
+                        appState.copy(vetVisits = updatedVisits),
+                        if (isEdit) "Termín u lékaře byl upraven!" else "Naplánována veterina pro ${savedVisit.catName}!"
                     )
                 }
             )
@@ -877,6 +1002,7 @@ private fun CatsTabScreen(
     cats: List<CatProfile>,
     foods: List<FoodItem>,
     medications: List<MedicationItem>,
+    vetVisits: List<VetVisitItem>,
     todayStr: String,
     familyCode: String,
     isCloudLogged: Boolean,
@@ -885,6 +1011,7 @@ private fun CatsTabScreen(
     onResetToBreedIllustration: (CatProfile) -> Unit,
     onEditCat: (CatProfile) -> Unit,
     onAddCat: () -> Unit,
+    onOpenVetSection: () -> Unit,
     onOpenCloudSettings: () -> Unit,
     onRefreshCloud: () -> Unit
 ) {
@@ -898,6 +1025,7 @@ private fun CatsTabScreen(
         items(cats) { cat ->
             val pendingFoodsForCat = foods.count { it.catId == cat.id && it.lastFedDate != todayStr }
             val pendingMedsForCat = medications.count { it.catId == cat.id && it.lastGivenDate != todayStr }
+            val nextVetForCat = vetVisits.firstOrNull { it.catId == cat.id && !it.isCompleted }
 
             Card(
                 backgroundColor = BgBeigeLight,
@@ -942,15 +1070,16 @@ private fun CatsTabScreen(
 
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
+                                text = "🎂 Narození: ${cat.birthDate}",
+                                color = CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
                                 text = "Věk: ${cat.ageText}  •  Váha: ${cat.weightKg} kg",
                                 color = CocoaMuted,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Kontrola: ${cat.lastCheckedDate}",
-                                color = CocoaMuted,
-                                fontSize = 11.sp
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
@@ -1025,6 +1154,43 @@ private fun CatsTabScreen(
                             value = cat.furStatus,
                             modifier = Modifier.weight(1f)
                         )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Proužek s nejbližší návštěvou veterináře / očkováním
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(BabyPinkCard)
+                            .border(1.dp, SoftBorder, RoundedCornerShape(12.dp))
+                            .clickable { onOpenVetSection() }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (nextVetForCat != null) {
+                                    "🩺 Veterina: ${nextVetForCat.dateText} – ${nextVetForCat.title}"
+                                } else {
+                                    "🩺 Veterina a očkování: Vše splněno (klepni pro plán)"
+                                },
+                                color = CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "➔",
+                                color = BabyPinkDeep,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -1163,7 +1329,7 @@ private fun CatsTabScreen(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Při výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, fotky, jídlo i léky se ihned obnoví.",
+                        text = "Při výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, fotky, jídlo, léky i veterina se ihned obnoví.",
                         color = CocoaMuted,
                         fontSize = 11.sp
                     )
@@ -1244,8 +1410,14 @@ private fun StatusMiniBadge(
 @Composable
 private fun StatusAndLogsTabScreen(
     cats: List<CatProfile>,
+    vetVisits: List<VetVisitItem>,
     logs: List<HealthLogItem>,
     onQuickUpdateCat: (CatProfile, String) -> Unit,
+    onAddVetVisitClick: () -> Unit,
+    onEditVetVisit: (VetVisitItem) -> Unit,
+    onCompleteVetVisit: (VetVisitItem) -> Unit,
+    onToggleVetNotification: (VetVisitItem) -> Unit,
+    onDeleteVetVisit: (VetVisitItem) -> Unit,
     onAddHealthLog: () -> Unit,
     onDeleteLog: (String) -> Unit
 ) {
@@ -1260,7 +1432,197 @@ private fun StatusAndLogsTabScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
+        // Sekce: Plánované návštěvy lékaře a očkování
         item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "🩺 Plánované návštěvy lékaře a očkování",
+                    color = CocoaBrown,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "Hlídej termíny očkování, odčervení a preventivních prohlídek",
+                    color = CocoaMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                    onClick = onAddVetVisitClick,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = BabyPinkAccent,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "➕ Naplánovat očkování nebo veterinu",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        items(vetVisits) { visit ->
+            Card(
+                backgroundColor = if (visit.isCompleted) Color(0xFFF3FAF5) else BgBeigeLight,
+                shape = RoundedCornerShape(18.dp),
+                elevation = 3.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = 1.5.dp,
+                        color = if (visit.isCompleted) MintSuccess.copy(alpha = 0.5f) else SoftBorder,
+                        shape = RoundedCornerShape(18.dp)
+                    )
+            ) {
+                Column(modifier = Modifier.padding(13.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BabyPinkSoft)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🐾 ${visit.catName}",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BgBeigeWarm)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "📅 ${visit.dateText} (${visit.timeOfDay})",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BabyPinkCard)
+                                    .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
+                                    .clickable { onEditVetVisit(visit) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "✏️ Upravit",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BgBeigeWarm)
+                                    .clickable { onDeleteVetVisit(visit) }
+                                    .padding(horizontal = 7.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🗑️",
+                                    fontSize = 13.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = visit.title,
+                        color = CocoaBrown,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    if (visit.notes.isNotBlank()) {
+                        Text(
+                            text = "Poznámka: ${visit.notes}",
+                            color = CocoaMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = { onCompleteVetVisit(visit) },
+                            enabled = !visit.isCompleted,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = if (visit.isCompleted) MintSuccess else BabyPinkAccent,
+                                contentColor = Color.White,
+                                disabledBackgroundColor = MintSuccess.copy(alpha = 0.8f),
+                                disabledContentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = if (visit.isCompleted) "✅ Návštěva proběhla" else "🩺 Označit: Splněno",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        if (!visit.isCompleted) {
+                            OutlinedButton(
+                                onClick = { onToggleVetNotification(visit) },
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = if (visit.notificationsEnabled) "🔔 ${visit.timeOfDay}" else "🔕 Vypnuto",
+                                    color = if (visit.notificationsEnabled) BabyPinkDeep else CocoaMuted,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sekce: Rychlé přepnutí denního stavu
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "💖 Rychlé přepnutí denního stavu",
                 color = CocoaBrown,
@@ -1384,6 +1746,7 @@ private fun StatusAndLogsTabScreen(
             }
         }
 
+        // Sekce: Historie a deníček zdraví
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -1960,12 +2323,14 @@ private fun MedicationsTabScreen(
 private fun NotificationsTabScreen(
     foods: List<FoodItem>,
     medications: List<MedicationItem>,
+    vetVisits: List<VetVisitItem>,
     notifications: List<AppNotificationItem>,
     onTestSystemNotification: () -> Unit,
     onMarkAllRead: () -> Unit
 ) {
     val activeFoodAlarms = foods.filter { it.notificationsEnabled }
     val activeMedAlarms = medications.filter { it.notificationsEnabled }
+    val activeVetAlarms = vetVisits.filter { it.notificationsEnabled && !it.isCompleted }
 
     LazyColumn(
         modifier = Modifier
@@ -1985,26 +2350,53 @@ private fun NotificationsTabScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "🔔 Upozornění na krmení a léky",
+                        text = "🔔 Upozornění na krmení, léky a veterinu",
                         color = CocoaBrown,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Aktivní časy upozornění (${activeFoodAlarms.size + activeMedAlarms.size}):",
+                        text = "Aktivní časy upozornění (${activeFoodAlarms.size + activeMedAlarms.size + activeVetAlarms.size}):",
                         color = CocoaMuted,
                         fontSize = 12.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (activeFoodAlarms.isEmpty() && activeMedAlarms.isEmpty()) {
+                    if (activeFoodAlarms.isEmpty() && activeMedAlarms.isEmpty() && activeVetAlarms.isEmpty()) {
                         Text(
-                            text = "Zatím nejsou zapnuté žádné budíky. Zapni je v záložce Jídlo nebo Léky.",
+                            text = "Zatím nejsou zapnuté žádné budíky.",
                             color = CocoaMuted,
                             fontSize = 12.sp
                         )
                     } else {
+                        activeVetAlarms.forEach { alarm ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BabyPinkSoft)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "🩺 ${alarm.dateText} (${alarm.timeOfDay}) • ${alarm.catName}: ${alarm.title}",
+                                    color = CocoaBrown,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "Zapnuto",
+                                    color = MintSuccess,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         activeFoodAlarms.forEach { alarm ->
                             Row(
                                 modifier = Modifier
@@ -2146,6 +2538,7 @@ private fun NotificationsTabScreen(
 @Composable
 private fun BottomNavigationAndFooter(
     activeTab: MainTab,
+    pendingVetCount: Int,
     pendingFoodsCount: Int,
     pendingMedsCount: Int,
     unreadNotifCount: Int,
@@ -2169,6 +2562,7 @@ private fun BottomNavigationAndFooter(
                 MainTab.values().forEach { tab ->
                     val selected = activeTab == tab
                     val badgeCount = when (tab) {
+                        MainTab.STATUS -> pendingVetCount
                         MainTab.FOOD -> pendingFoodsCount
                         MainTab.MEDS -> pendingMedsCount
                         MainTab.ALERTS -> unreadNotifCount
@@ -2238,7 +2632,7 @@ private fun EditCatDialog(
     onSave: (CatProfile) -> Unit
 ) {
     var name by remember { mutableStateOf(cat.name) }
-    var breed by remember { mutableStateOf(cat.breed) }
+    var birthDate by remember { mutableStateOf(cat.birthDate) }
     var ageText by remember { mutableStateOf(cat.ageText) }
     var weightKg by remember { mutableStateOf(cat.weightKg) }
     var furStatus by remember { mutableStateOf(cat.furStatus) }
@@ -2261,12 +2655,21 @@ private fun EditCatDialog(
                     fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Jméno kočičky") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = birthDate,
+                    onValueChange = { birthDate = it },
+                    label = { Text("Datum narození (např. 14. 5. 2024)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -2332,7 +2735,7 @@ private fun EditCatDialog(
                             onSave(
                                 cat.copy(
                                     name = name.ifBlank { cat.name },
-                                    breed = breed.ifBlank { cat.breed },
+                                    birthDate = birthDate.ifBlank { cat.birthDate },
                                     ageText = ageText.ifBlank { "2 roky" },
                                     weightKg = weightKg.ifBlank { "4.0" },
                                     furStatus = furStatus.ifBlank { "Hebká ✨" },
@@ -2359,6 +2762,7 @@ private fun AddCatDialog(
 ) {
     var name by remember { mutableStateOf("") }
     var selectedBreedType by remember { mutableStateOf("RAGDOLL") }
+    var birthDate by remember { mutableStateOf("1. 5. 2025") }
     var ageText by remember { mutableStateOf("1 rok") }
     var weightKg by remember { mutableStateOf("3.8") }
     var notes by remember { mutableStateOf("Milá a hravá kočička 💕") }
@@ -2379,12 +2783,21 @@ private fun AddCatDialog(
                     fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Jméno kočičky") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = birthDate,
+                    onValueChange = { birthDate = it },
+                    label = { Text("Datum narození (např. 1. 5. 2025)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -2473,13 +2886,147 @@ private fun AddCatDialog(
                                     energyLevel = 95,
                                     notes = notes,
                                     photoBase64 = "",
-                                    lastCheckedDate = PlatformManager.currentDateString()
+                                    lastCheckedDate = PlatformManager.currentDateString(),
+                                    birthDate = birthDate.ifBlank { "1. 5. 2025" }
                                 )
                             )
                         },
                         colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
                     ) {
                         Text("Přidat", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddOrEditVetVisitDialog(
+    cats: List<CatProfile>,
+    initialVisit: VetVisitItem?,
+    onDismiss: () -> Unit,
+    onSave: (VetVisitItem) -> Unit
+) {
+    val isEdit = initialVisit != null
+    var selectedCat by remember {
+        mutableStateOf(
+            cats.find { it.id == initialVisit?.catId } ?: cats.firstOrNull()
+        )
+    }
+    var title by remember { mutableStateOf(initialVisit?.title ?: "") }
+    var dateText by remember { mutableStateOf(initialVisit?.dateText ?: "20. 11. 2026") }
+    var timeOfDay by remember { mutableStateOf(initialVisit?.timeOfDay ?: "09:30") }
+    var notes by remember { mutableStateOf(initialVisit?.notes ?: "Vzít očkovací průkaz") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            backgroundColor = BgBeigeLight,
+            shape = RoundedCornerShape(20.dp),
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = if (isEdit) "✏️ Upravit termín u lékaře" else "🩺 Naplánovat očkování / veterinu",
+                    color = CocoaBrown,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Pro kočičku:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    cats.forEach { cat ->
+                        val sel = selectedCat?.id == cat.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (sel) BabyPinkAccent else BabyPinkCard)
+                                .clickable { selectedCat = cat }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = cat.name,
+                                color = if (sel) Color.White else CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Úkon (např. Roční očkování, Kontrola zoubků)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = dateText,
+                        onValueChange = { dateText = it },
+                        label = { Text("Datum (např. 20. 11. 2026)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = timeOfDay,
+                        onValueChange = { timeOfDay = it },
+                        label = { Text("Čas (HH:MM)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Poznámka (např. Vzít očkovací průkaz)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Zrušit", color = CocoaMuted)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            val targetCat = selectedCat ?: cats.firstOrNull()
+                            if (targetCat != null) {
+                                onSave(
+                                    VetVisitItem(
+                                        id = initialVisit?.id ?: "vet_${PlatformManager.currentTimeMillis()}",
+                                        catId = targetCat.id,
+                                        catName = targetCat.name,
+                                        title = title.ifBlank { "Očkování a prohlídka" },
+                                        dateText = dateText.ifBlank { PlatformManager.currentDateString() },
+                                        timeOfDay = timeOfDay.ifBlank { "09:30" },
+                                        notes = notes,
+                                        isCompleted = initialVisit?.isCompleted ?: false,
+                                        notificationsEnabled = initialVisit?.notificationsEnabled ?: true
+                                    )
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
+                    ) {
+                        Text(
+                            text = if (isEdit) "Uložit změny" else "Uložit a zapnout 🔔",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }

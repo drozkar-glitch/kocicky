@@ -14,7 +14,8 @@ data class CatProfile(
     val energyLevel: Int, // 0..100
     val notes: String,
     val photoBase64: String,
-    val lastCheckedDate: String
+    val lastCheckedDate: String,
+    val birthDate: String = "14. 5. 2024"
 )
 
 data class FoodItem(
@@ -43,6 +44,18 @@ data class MedicationItem(
     val notificationsEnabled: Boolean
 )
 
+data class VetVisitItem(
+    val id: String,
+    val catId: String,
+    val catName: String,
+    val title: String, // např. "Roční očkování Purevax"
+    val dateText: String, // např. "20. 11. 2026"
+    val timeOfDay: String, // např. "09:30"
+    val notes: String, // např. "Vzít očkovací průkaz"
+    val isCompleted: Boolean,
+    val notificationsEnabled: Boolean
+)
+
 data class HealthLogItem(
     val id: String,
     val catId: String,
@@ -67,7 +80,8 @@ data class CatAppState(
     val medications: List<MedicationItem>,
     val healthLogs: List<HealthLogItem>,
     val notifications: List<AppNotificationItem>,
-    val foods: List<FoodItem> = DefaultCatData.defaultFoods()
+    val foods: List<FoodItem> = DefaultCatData.defaultFoods(),
+    val vetVisits: List<VetVisitItem> = DefaultCatData.defaultVetVisits()
 )
 
 object DefaultCatData {
@@ -123,6 +137,31 @@ object DefaultCatData {
         )
     )
 
+    fun defaultVetVisits(): List<VetVisitItem> = listOf(
+        VetVisitItem(
+            id = "vet_safirka_ockovani",
+            catId = "cat_safirka",
+            catName = "Safírka",
+            title = "Roční očkování + kontrola kožíšku",
+            dateText = "20. 11. 2026",
+            timeOfDay = "09:30",
+            notes = "Vzít očkovací průkaz a oblíbenou dečku do přepravky.",
+            isCompleted = false,
+            notificationsEnabled = true
+        ),
+        VetVisitItem(
+            id = "vet_zlatin_prohlidka",
+            catId = "cat_zlatin",
+            catName = "Zlatín",
+            title = "Očkování a preventivní kontrola zoubků",
+            dateText = "4. 12. 2026",
+            timeOfDay = "10:00",
+            notes = "Zvážit na veterině, zkontrolovat drápky a ušní štětičky.",
+            isCompleted = false,
+            notificationsEnabled = true
+        )
+    )
+
     fun createInitialState(): CatAppState {
         val today = PlatformManager.currentDateString()
         val safirka = CatProfile(
@@ -139,7 +178,8 @@ object DefaultCatData {
             energyLevel = 92,
             notes = "Modrooká princezna Safírka. Miluje chování v náručí, drbání pod bradičkou a odpočinek na měkkém polštářku.",
             photoBase64 = "",
-            lastCheckedDate = today
+            lastCheckedDate = today,
+            birthDate = "14. 5. 2024"
         )
 
         val zlatin = CatProfile(
@@ -156,7 +196,8 @@ object DefaultCatData {
             energyLevel = 95,
             notes = "Majestátní Mainský mývalí kocour s krásnými štětičkami na uších a huňatým ocasem. Rád pozoruje ptáčky a povídá si.",
             photoBase64 = "",
-            lastCheckedDate = today
+            lastCheckedDate = today,
+            birthDate = "20. 8. 2023"
         )
 
         val meds = listOf(
@@ -235,15 +276,15 @@ object DefaultCatData {
             AppNotificationItem(
                 id = "notif_init_1",
                 title = "🐾 Vítej v Terezčiných Kočičkách!",
-                message = "Safírka (Ragdollka) a Zlatín (Mainská mývalí) mají připravené své karty, jídlo i rozvrh léků.",
+                message = "Safírka (Ragdollka) a Zlatín (Mainská mývalí) mají připravené své karty, jídlo, léky i termíny u veterináře.",
                 timeText = "08:00",
                 isRead = false
             ),
             AppNotificationItem(
                 id = "notif_init_2",
-                title = "🥣 Připomínka krmení a vitamínů",
-                message = "Nezapomeň dnes zkontrolovat misky, čerstvou vodu a denní dávku pro Safírku a Zlatína.",
-                timeText = "18:00",
+                title = "🩺 Hlídání očkování a veteriny",
+                message = "V záložce Stavy najdeš přehled plánovaných návštěv lékaře a očkování.",
+                timeText = "09:30",
                 isRead = false
             )
         )
@@ -254,7 +295,8 @@ object DefaultCatData {
             medications = meds,
             healthLogs = logs,
             notifications = notifs,
-            foods = defaultFoods()
+            foods = defaultFoods(),
+            vetVisits = defaultVetVisits()
         )
     }
 }
@@ -298,7 +340,8 @@ object CatDataSerializer {
                 c.energyLevel.toString(),
                 enc(c.notes),
                 enc(c.photoBase64),
-                enc(c.lastCheckedDate)
+                enc(c.lastCheckedDate),
+                enc(c.birthDate)
             ).joinToString("|")
         }
 
@@ -332,6 +375,20 @@ object CatDataSerializer {
             ).joinToString("|")
         }
 
+        val vetPacked = state.vetVisits.joinToString("^") { v ->
+            listOf(
+                enc(v.id),
+                enc(v.catId),
+                enc(v.catName),
+                enc(v.title),
+                enc(v.dateText),
+                enc(v.timeOfDay),
+                enc(v.notes),
+                if (v.isCompleted) "1" else "0",
+                if (v.notificationsEnabled) "1" else "0"
+            ).joinToString("|")
+        }
+
         val logsPacked = state.healthLogs.joinToString("^") { l ->
             listOf(
                 enc(l.id),
@@ -360,6 +417,7 @@ object CatDataSerializer {
             append("\"catsData\":\"$catsPacked\",")
             append("\"foodsData\":\"$foodsPacked\",")
             append("\"medsData\":\"$medsPacked\",")
+            append("\"vetVisitsData\":\"$vetPacked\",")
             append("\"logsData\":\"$logsPacked\",")
             append("\"notifsData\":\"$notifsPacked\"")
             append("}")
@@ -416,27 +474,33 @@ object CatDataSerializer {
             val catsRaw = extractJsonString(json, "catsData") ?: ""
             val foodsRaw = extractJsonString(json, "foodsData")
             val medsRaw = extractJsonString(json, "medsData") ?: ""
+            val vetRaw = extractJsonString(json, "vetVisitsData")
             val logsRaw = extractJsonString(json, "logsData") ?: ""
             val notifsRaw = extractJsonString(json, "notifsData") ?: ""
 
             val cats = if (catsRaw.isBlank()) emptyList() else catsRaw.split("^").mapNotNull { row ->
                 val p = row.split("|")
-                if (p.size < 14) null else CatProfile(
-                    id = dec(p[0]),
-                    name = dec(p[1]),
-                    breed = dec(p[2]),
-                    breedType = dec(p[3]),
-                    ageText = dec(p[4]),
-                    weightKg = dec(p[5]),
-                    mood = dec(p[6]),
-                    appetite = dec(p[7]),
-                    waterIntake = dec(p[8]),
-                    furStatus = dec(p[9]),
-                    energyLevel = p[10].toIntOrNull() ?: 90,
-                    notes = dec(p[11]),
-                    photoBase64 = dec(p[12]),
-                    lastCheckedDate = dec(p[13])
-                )
+                if (p.size < 14) null else {
+                    val catId = dec(p[0])
+                    val defaultDob = if (catId == "cat_zlatin") "20. 8. 2023" else "14. 5. 2024"
+                    CatProfile(
+                        id = catId,
+                        name = dec(p[1]),
+                        breed = dec(p[2]),
+                        breedType = dec(p[3]),
+                        ageText = dec(p[4]),
+                        weightKg = dec(p[5]),
+                        mood = dec(p[6]),
+                        appetite = dec(p[7]),
+                        waterIntake = dec(p[8]),
+                        furStatus = dec(p[9]),
+                        energyLevel = p[10].toIntOrNull() ?: 90,
+                        notes = dec(p[11]),
+                        photoBase64 = dec(p[12]),
+                        lastCheckedDate = dec(p[13]),
+                        birthDate = if (p.size >= 15 && dec(p[14]).isNotBlank()) dec(p[14]) else defaultDob
+                    )
+                }
             }
 
             val foods = when {
@@ -475,6 +539,25 @@ object CatDataSerializer {
                 )
             }
 
+            val vetVisits = when {
+                vetRaw == null -> DefaultCatData.defaultVetVisits()
+                vetRaw.isBlank() -> emptyList()
+                else -> vetRaw.split("^").mapNotNull { row ->
+                    val p = row.split("|")
+                    if (p.size < 9) null else VetVisitItem(
+                        id = dec(p[0]),
+                        catId = dec(p[1]),
+                        catName = dec(p[2]),
+                        title = dec(p[3]),
+                        dateText = dec(p[4]),
+                        timeOfDay = dec(p[5]),
+                        notes = dec(p[6]),
+                        isCompleted = p[7] == "1",
+                        notificationsEnabled = p[8] == "1"
+                    )
+                }
+            }
+
             val logs = if (logsRaw.isBlank()) emptyList() else logsRaw.split("^").mapNotNull { row ->
                 val p = row.split("|")
                 if (p.size < 7) null else HealthLogItem(
@@ -505,7 +588,8 @@ object CatDataSerializer {
                 medications = meds,
                 healthLogs = logs,
                 notifications = notifs,
-                foods = foods
+                foods = foods,
+                vetVisits = vetVisits
             )
         } catch (e: Exception) {
             null
