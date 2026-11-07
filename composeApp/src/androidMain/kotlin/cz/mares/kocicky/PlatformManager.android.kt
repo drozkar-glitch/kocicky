@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -28,7 +27,7 @@ actual object PlatformManager {
     private const val KEY_STATE_JSON = "cat_state_json"
     private const val KEY_FAMILY_CODE = "family_code"
     private const val KEY_FAMILY_PIN = "family_pin"
-    const val CHANNEL_ID = "kocicky_meds_channel"
+    const val CHANNEL_ID = "terezka_kocicky_channel"
 
     private const val FIREBASE_BASE_URL =
         "https://mares-games-default-rtdb.europe-west1.firebasedatabase.app"
@@ -42,7 +41,7 @@ actual object PlatformManager {
         createNotificationChannel(context.applicationContext)
     }
 
-    private fun createNotificationChannel(context: Context) {
+    fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
@@ -113,7 +112,7 @@ actual object PlatformManager {
     actual fun syncToFirebase(
         familyCode: String,
         familyPin: String,
-        jsonData: String,
+        jsonPayload: String,
         onResult: (Boolean, String) -> Unit
     ) {
         val mainHandler = Handler(Looper.getMainLooper())
@@ -132,7 +131,7 @@ actual object PlatformManager {
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 }
                 OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                    writer.write(jsonData)
+                    writer.write(jsonPayload)
                     writer.flush()
                 }
                 val code = conn.responseCode
@@ -276,8 +275,8 @@ actual object PlatformManager {
         nm.notify(notifId, notification)
     }
 
-    actual fun pickPhotoFromGallery(onResult: (String?) -> Unit) {
-        pendingPhotoReceiver = onResult
+    actual fun pickPhotoFromGallery(onPhotoSelected: (String?) -> Unit) {
+        pendingPhotoReceiver = onPhotoSelected
         photoLauncherAction?.invoke()
     }
 
@@ -290,14 +289,5 @@ actual object PlatformManager {
         } catch (_: Exception) {
             null
         }
-    }
-}
-
-class NotificationReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val title = intent.getStringExtra("title") ?: "🐾 Moji mazlíčci"
-        val message = intent.getStringExtra("message") ?: "Připomínka péče o mazlíčka 💕"
-        val notifId = intent.getIntExtra("notifId", 1001)
-        PlatformManager.showSystemNotification(context, notifId, title, message)
     }
 }

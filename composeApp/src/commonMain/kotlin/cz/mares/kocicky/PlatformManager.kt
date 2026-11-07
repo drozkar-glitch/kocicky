@@ -18,7 +18,7 @@ expect object PlatformManager {
     fun syncToFirebase(
         familyCode: String,
         familyPin: String,
-        jsonData: String,
+        jsonPayload: String,
         onResult: (Boolean, String) -> Unit
     )
 
@@ -40,7 +40,7 @@ expect object PlatformManager {
 
     fun sendImmediateTestNotification(title: String, message: String)
 
-    fun pickPhotoFromGallery(onResult: (String?) -> Unit)
+    fun pickPhotoFromGallery(onPhotoSelected: (String?) -> Unit)
 
     fun decodeBase64ToBitmap(base64: String): ImageBitmap?
 }
