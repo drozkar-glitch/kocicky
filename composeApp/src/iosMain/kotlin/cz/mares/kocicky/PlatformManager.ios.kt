@@ -5,9 +5,14 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
 import platform.Foundation.*
+import platform.UIKit.*
 import platform.UserNotifications.*
+import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 import platform.posix.memcpy
@@ -18,6 +23,8 @@ actual object PlatformManager {
     private const val KEY_FAMILY_CODE = "terezciny_kocicky_family_v2"
     private const val KEY_FAMILY_PIN = "terezciny_kocicky_pin_v2"
     private const val FIREBASE_BASE = "https://mares-games-default-rtdb.europe-west1.firebasedatabase.app"
+
+    private var activePickerDelegate: NSObject? = null
 
     actual fun loadLocalData(): String? {
         return NSUserDefaults.standardUserDefaults.stringForKey(KEY_STATE_JSON)
@@ -123,20 +130,91 @@ actual object PlatformManager {
         task.resume()
     }
 
+    private fun nsDataToByteArray(nsData: NSData): ByteArray? {
+        val length = nsData.length.toInt()
+        if (length <= 0) return null
+        val bytes = ByteArray(length)
+        bytes.usePinned { pinned ->
+            memcpy(pinned.addressOf(0), nsData.bytes, nsData.length)
+        }
+        return bytes
+    }
+
+    private fun compressAndEncodeUiImage(uiImage: UIImage): String? {
+        return try {
+            val rawData = UIImageJPEGRepresentation(uiImage, 0.75) ?: return null
+            val rawBytes = nsDataToByteArray(rawData) ?: return null
+            val skiaImg = Image.makeFromEncoded(rawBytes)
+            val maxDim = 360
+            val ratio = minOf(
+                maxDim.toFloat() / skiaImg.width.toFloat(),
+                maxDim.toFloat() / skiaImg.height.toFloat(),
+                1f
+            )
+            val targetW = (skiaImg.width * ratio).toInt().coerceAtLeast(1)
+            val targetH = (skiaImg.height * ratio).toInt().coerceAtLeast(1)
+            val surface = Surface.makeRasterN32Premul(targetW, targetH)
+            surface.canvas.drawImageRect(
+                skiaImg,
+                Rect.makeWH(targetW.toFloat(), targetH.toFloat())
+            )
+            val encodedData = surface.makeImageSnapshot().encodeToData(EncodedImageFormat.JPEG, 72)
+                ?: return rawData.base64EncodedStringWithOptions(0u)
+            val finalBytes = encodedData.bytes
+            finalBytes.usePinned { pinned ->
+                val outNsData = NSData.create(bytes = pinned.addressOf(0), length = finalBytes.size.toULong())
+                outNsData.base64EncodedStringWithOptions(0u)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     actual fun pickPhotoFromGallery(onPhotoSelected: (String?) -> Unit) {
-        onPhotoSelected(null)
+        dispatch_async(dispatch_get_main_queue()) {
+            val rootVc = UIApplication.sharedApplication.keyWindow?.rootViewController
+            if (rootVc == null) {
+                onPhotoSelected(null)
+                return@dispatch_async
+            }
+
+            val picker = UIImagePickerController().apply {
+                sourceType = UIImagePickerControllerSourceType.UIImagePickerControllerSourceTypePhotoLibrary
+                allowsEditing = false
+            }
+
+            val delegateObj = object : NSObject(), UIImagePickerControllerDelegateProtocol, UINavigationControllerDelegateProtocol {
+                override fun imagePickerController(
+                    picker: UIImagePickerController,
+                    didFinishPickingMediaWithInfo: kotlin.collections.Map<Any?, *>
+                ) {
+                    val img = didFinishPickingMediaWithInfo[UIImagePickerControllerOriginalImage] as? UIImage
+                    val b64 = if (img != null) compressAndEncodeUiImage(img) else null
+                    picker.dismissViewControllerAnimated(true) {
+                        activePickerDelegate = null
+                        onPhotoSelected(b64)
+                    }
+                }
+
+                override fun imagePickerControllerDidCancel(picker: UIImagePickerController) {
+                    picker.dismissViewControllerAnimated(true) {
+                        activePickerDelegate = null
+                        onPhotoSelected(null)
+                    }
+                }
+            }
+
+            activePickerDelegate = delegateObj
+            picker.delegate = delegateObj
+            rootVc.presentViewController(picker, animated = true, completion = null)
+        }
     }
 
     actual fun decodeBase64ToBitmap(base64: String): ImageBitmap? {
         if (base64.isBlank()) return null
         return try {
             val nsData = NSData.create(base64EncodedString = base64, options = 0u) ?: return null
-            val length = nsData.length.toInt()
-            if (length <= 0) return null
-            val bytes = ByteArray(length)
-            bytes.usePinned { pinned ->
-                memcpy(pinned.addressOf(0), nsData.bytes, nsData.length)
-            }
+            val bytes = nsDataToByteArray(nsData) ?: return null
             Image.makeFromEncoded(bytes).toComposeImageBitmap()
         } catch (e: Exception) {
             null

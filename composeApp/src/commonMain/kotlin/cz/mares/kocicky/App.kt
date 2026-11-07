@@ -78,7 +78,6 @@ private data class PendingDeleteAction(
 
 private fun formatSyncTimestamp(epochMillis: Long, dateFallback: String): String {
     if (epochMillis <= 0L) return dateFallback
-    // Převod UTC milisekund na středoevropský čas (CET/CEST +1h) pro čitelný čas HH:MM
     val totalMinutes = (epochMillis / 60000L) + 60L
     val minute = ((totalMinutes % 60L) + 60L) % 60L
     val hour = (((totalMinutes / 60L) % 24L) + 24L) % 24L
@@ -99,7 +98,6 @@ fun App() {
 
     var familyCode by remember { mutableStateOf(PlatformManager.loadFamilyCode()) }
     var familyPin by remember { mutableStateOf(PlatformManager.loadFamilyPin()) }
-    val isCloudLogged = familyCode.isNotBlank() && familyPin.isNotBlank()
 
     var syncStatusText by remember {
         mutableStateOf(
@@ -124,7 +122,6 @@ fun App() {
     var activeTab by remember { mutableStateOf(MainTab.PETS) }
     var selectedCatIdFilter by remember { mutableStateOf<String?>(null) }
 
-    // Dialogy pro přidávání, úpravu, vážení, mazání a hlavní Nastavení (⚙️)
     var editingCat by remember { mutableStateOf<CatProfile?>(null) }
     var deletingCat by remember { mutableStateOf<CatProfile?>(null) }
     var weighingCat by remember { mutableStateOf<CatProfile?>(null) }
@@ -1242,7 +1239,6 @@ private fun TopHeaderBar(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Zubaté kolečko nastavení úplně napravo nahoře
             Box(
                 modifier = Modifier
                     .size(36.dp)
@@ -4753,7 +4749,6 @@ private fun SettingsAndSyncDialog(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Přehledová karta stavu a času poslední synchronizace
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -4807,7 +4802,6 @@ private fun SettingsAndSyncDialog(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     if (isLogged && !isEditingCredentials) {
-                        // Kompaktní tlačítka pro již připojený účet
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -4847,7 +4841,6 @@ private fun SettingsAndSyncDialog(
                             }
                         }
                     } else {
-                        // Zadávací formulář pro přihlášení nebo změnu účtu/PINu
                         Text(
                             text = "Zadej váš Rodinný účet (např. terezka) a tajné Rodinné heslo / PIN:",
                             color = CocoaMuted,
