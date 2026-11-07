@@ -3,6 +3,9 @@ package cz.mares.kocicky
 import androidx.compose.ui.graphics.ImageBitmap
 
 expect object PlatformManager {
+    fun currentTimeMillis(): Long
+    fun currentDateString(): String
+
     fun loadLocalData(): String?
     fun saveLocalData(json: String)
 
@@ -15,7 +18,7 @@ expect object PlatformManager {
     fun syncToFirebase(
         familyCode: String,
         familyPin: String,
-        jsonPayload: String,
+        jsonData: String,
         onResult: (Boolean, String) -> Unit
     )
 
@@ -25,9 +28,6 @@ expect object PlatformManager {
         onResult: (Boolean, String?, String) -> Unit
     )
 
-    fun pickPhotoFromGallery(onPhotoSelected: (String?) -> Unit)
-    fun decodeBase64ToBitmap(base64: String): ImageBitmap?
-
     fun scheduleMedicationNotification(
         id: String,
         catName: String,
@@ -35,9 +35,12 @@ expect object PlatformManager {
         dosage: String,
         timeHhMm: String
     )
+
     fun cancelMedicationNotification(id: String)
+
     fun sendImmediateTestNotification(title: String, message: String)
 
-    fun currentDateString(): String
-    fun currentTimeMillis(): Long
+    fun pickPhotoFromGallery(onResult: (String?) -> Unit)
+
+    fun decodeBase64ToBitmap(base64: String): ImageBitmap?
 }
