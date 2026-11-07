@@ -1,5 +1,8 @@
 package cz.mares.kocicky
 
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
 data class CatProfile(
     val id: String,
     val name: String,
@@ -21,6 +24,14 @@ data class CatProfile(
     val insuranceTo: String = "31. 12. 2026",
     val species: String = "CAT", // "CAT" = Kočka, "DOG" = Pes
     val breedSize: String = "MEDIUM" // Pro psy: "SMALL" (<10kg), "MEDIUM" (10-25kg), "LARGE" (25-45kg), "GIANT" (>45kg)
+)
+
+data class WeightRecord(
+    val id: String,
+    val catId: String,
+    val dateText: String,
+    val weightKg: Float,
+    val note: String = ""
 )
 
 data class FoodItem(
@@ -87,7 +98,8 @@ data class CatAppState(
     val notifications: List<AppNotificationItem>,
     val foods: List<FoodItem> = DefaultCatData.defaultFoods(),
     val vetVisits: List<VetVisitItem> = DefaultCatData.defaultVetVisits(),
-    val preferredSpeciesMode: String = "UNSET" // "UNSET" (zobrazí úvodní volbu), "ALL", "CAT", "DOG"
+    val preferredSpeciesMode: String = "ALL", // "ALL", "CAT", "DOG"
+    val weightRecords: List<WeightRecord> = DefaultCatData.defaultWeightRecords()
 )
 
 data class BreedPreset(
@@ -128,6 +140,38 @@ object PetBreedCatalog {
         "LARGE" -> "velká rasa 25–45 kg"
         "GIANT" -> "obří rasa nad 45 kg"
         else -> "střední rasa"
+    }
+}
+
+object WeightFormatHelper {
+    fun parseWeightKg(raw: String): Float? {
+        val cleaned = raw.trim().replace(",", ".").replace("kg", "", ignoreCase = true).trim()
+        val v = cleaned.toFloatOrNull() ?: return null
+        return if (v in 0.05f..150f) v else null
+    }
+
+    fun formatWeight(value: Float): String {
+        val rounded10 = (value * 10f).roundToInt()
+        val whole = rounded10 / 10
+        val dec = abs(rounded10 % 10)
+        return "$whole.$dec"
+    }
+
+    fun formatDiff(diff: Float): String {
+        val rounded10 = (diff * 10f).roundToInt()
+        if (rounded10 == 0) return "0.0 kg"
+        val sign = if (rounded10 > 0) "+" else "-"
+        val absVal = abs(rounded10)
+        return "$sign${absVal / 10}.${absVal % 10} kg"
+    }
+
+    fun shortDateLabel(dateText: String): String {
+        val parts = dateText.trim().split(".").map { it.trim() }.filter { it.isNotEmpty() }
+        return if (parts.size >= 2) {
+            "${parts[0]}. ${parts[1]}."
+        } else {
+            dateText.take(6)
+        }
     }
 }
 
@@ -215,7 +259,6 @@ object CatAgeCalculator {
                 }
             }
         } else {
-            // Kočka
             when {
                 totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
                 totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
@@ -246,6 +289,54 @@ object CatAgeCalculator {
 }
 
 object DefaultCatData {
+
+    fun defaultWeightRecords(today: String = PlatformManager.currentDateString()): List<WeightRecord> = listOf(
+        WeightRecord(id = "w_saf_1", catId = "cat_safirka", dateText = "15. 8. 2026", weightKg = 3.9f, note = "Letní vážení"),
+        WeightRecord(id = "w_saf_2", catId = "cat_safirka", dateText = "15. 9. 2026", weightKg = 4.0f, note = "Pravidelná kontrola"),
+        WeightRecord(id = "w_saf_3", catId = "cat_safirka", dateText = "15. 10. 2026", weightKg = 4.1f, note = "Krásně prospívá"),
+        WeightRecord(id = "w_saf_4", catId = "cat_safirka", dateText = today, weightKg = 4.2f, note = "Aktuální váha"),
+        WeightRecord(id = "w_zla_1", catId = "cat_zlatin", dateText = "15. 8. 2026", weightKg = 6.4f, note = "Letní vážení"),
+        WeightRecord(id = "w_zla_2", catId = "cat_zlatin", dateText = "15. 9. 2026", weightKg = 6.6f, note = "Roste jako z vody"),
+        WeightRecord(id = "w_zla_3", catId = "cat_zlatin", dateText = "15. 10. 2026", weightKg = 6.7f, note = "Pravidelná kontrola"),
+        WeightRecord(id = "w_zla_4", catId = "cat_zlatin", dateText = today, weightKg = 6.8f, note = "Aktuální váha")
+    )
+
+    fun buildFallbackWeightRecordsForPets(cats: List<CatProfile>, today: String = PlatformManager.currentDateString()): List<WeightRecord> {
+        val list = mutableListOf<WeightRecord>()
+        for (cat in cats) {
+            val w = WeightFormatHelper.parseWeightKg(cat.weightKg) ?: 4.0f
+            val prev1 = (w - 0.2f).coerceAtLeast(0.5f)
+            val prev2 = (w - 0.1f).coerceAtLeast(0.5f)
+            list.add(
+                WeightRecord(
+                    id = "w_init_1_${cat.id}",
+                    catId = cat.id,
+                    dateText = "1. 9. 2026",
+                    weightKg = prev1,
+                    note = "Předchozí vážení"
+                )
+            )
+            list.add(
+                WeightRecord(
+                    id = "w_init_2_${cat.id}",
+                    catId = cat.id,
+                    dateText = "1. 10. 2026",
+                    weightKg = prev2,
+                    note = "Kontrolní vážení"
+                )
+            )
+            list.add(
+                WeightRecord(
+                    id = "w_init_3_${cat.id}",
+                    catId = cat.id,
+                    dateText = cat.lastCheckedDate.ifBlank { today },
+                    weightKg = w,
+                    note = "Aktuální váha"
+                )
+            )
+        }
+        return list
+    }
 
     fun defaultFoods(): List<FoodItem> = listOf(
         FoodItem(
@@ -447,14 +538,14 @@ object DefaultCatData {
             AppNotificationItem(
                 id = "notif_init_1",
                 title = "🐾 Vítej v aplikaci Moji mazlíčci!",
-                message = "Sleduj kočičky i pejsky, jejich rasu, přepočet věku, jídlo, léky, pojištění i očkování.",
+                message = "Sleduj kočičky i pejsky, jejich rasu, graf váhy, přepočet věku, jídlo, léky, pojištění i očkování.",
                 timeText = "08:00",
                 isRead = false
             ),
             AppNotificationItem(
                 id = "notif_init_2",
-                title = "🩺 Hlídání očkování a veteriny",
-                message = "V záložce Stavy najdeš přehled plánovaných návštěv lékaře a očkování.",
+                title = "📊 Graf váhy a kondice",
+                message = "V záložce Stavy najdeš u každého mazlíčka přehledný graf vývoje váhy a rychlé vážení.",
                 timeText = "09:30",
                 isRead = false
             )
@@ -468,7 +559,8 @@ object DefaultCatData {
             notifications = notifs,
             foods = defaultFoods(),
             vetVisits = defaultVetVisits(),
-            preferredSpeciesMode = "UNSET"
+            preferredSpeciesMode = "ALL",
+            weightRecords = defaultWeightRecords(today)
         )
     }
 }
@@ -588,6 +680,16 @@ object CatDataSerializer {
             ).joinToString("|")
         }
 
+        val weightsPacked = state.weightRecords.joinToString("^") { w ->
+            listOf(
+                enc(w.id),
+                enc(w.catId),
+                enc(w.dateText),
+                WeightFormatHelper.formatWeight(w.weightKg),
+                enc(w.note)
+            ).joinToString("|")
+        }
+
         return buildString {
             append("{")
             append("\"updatedAt\":${state.updatedAt},")
@@ -597,7 +699,8 @@ object CatDataSerializer {
             append("\"medsData\":\"$medsPacked\",")
             append("\"vetVisitsData\":\"$vetPacked\",")
             append("\"logsData\":\"$logsPacked\",")
-            append("\"notifsData\":\"$notifsPacked\"")
+            append("\"notifsData\":\"$notifsPacked\",")
+            append("\"weightsData\":\"$weightsPacked\"")
             append("}")
         }
     }
@@ -649,13 +752,15 @@ object CatDataSerializer {
         if (json.isBlank() || !json.contains("\"catsData\"")) return null
         return try {
             val updatedAt = extractJsonLong(json, "updatedAt")
-            val speciesMode = extractJsonString(json, "speciesMode") ?: "ALL"
+            val rawSpeciesMode = extractJsonString(json, "speciesMode") ?: "ALL"
+            val speciesMode = if (rawSpeciesMode == "CAT" || rawSpeciesMode == "DOG") rawSpeciesMode else "ALL"
             val catsRaw = extractJsonString(json, "catsData") ?: ""
             val foodsRaw = extractJsonString(json, "foodsData")
             val medsRaw = extractJsonString(json, "medsData") ?: ""
             val vetRaw = extractJsonString(json, "vetVisitsData")
             val logsRaw = extractJsonString(json, "logsData") ?: ""
             val notifsRaw = extractJsonString(json, "notifsData") ?: ""
+            val weightsRaw = extractJsonString(json, "weightsData")
 
             val cats = if (catsRaw.isBlank()) emptyList() else catsRaw.split("^").mapNotNull { row ->
                 val p = row.split("|")
@@ -779,6 +884,24 @@ object CatDataSerializer {
                 )
             }
 
+            val weightRecords = when {
+                weightsRaw == null -> DefaultCatData.buildFallbackWeightRecordsForPets(cats)
+                weightsRaw.isBlank() -> DefaultCatData.buildFallbackWeightRecordsForPets(cats)
+                else -> weightsRaw.split("^").mapNotNull { row ->
+                    val p = row.split("|")
+                    if (p.size < 4) null else {
+                        val wVal = WeightFormatHelper.parseWeightKg(dec(p[3])) ?: return@mapNotNull null
+                        WeightRecord(
+                            id = dec(p[0]),
+                            catId = dec(p[1]),
+                            dateText = dec(p[2]),
+                            weightKg = wVal,
+                            note = if (p.size >= 5) dec(p[4]) else ""
+                        )
+                    }
+                }
+            }
+
             CatAppState(
                 updatedAt = updatedAt,
                 cats = cats,
@@ -787,7 +910,8 @@ object CatDataSerializer {
                 notifications = notifs,
                 foods = foods,
                 vetVisits = vetVisits,
-                preferredSpeciesMode = speciesMode
+                preferredSpeciesMode = speciesMode,
+                weightRecords = weightRecords
             )
         } catch (e: Exception) {
             null

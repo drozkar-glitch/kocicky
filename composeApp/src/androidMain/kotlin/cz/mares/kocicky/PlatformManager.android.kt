@@ -214,6 +214,15 @@ actual object PlatformManager {
         }.start()
     }
 
+    private fun extractSpecificDate(text: String): Triple<Int, Int, Int>? {
+        val regex = Regex("""(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})""")
+        val m = regex.find(text) ?: return null
+        val d = m.groupValues[1].toIntOrNull() ?: return null
+        val mo = m.groupValues[2].toIntOrNull() ?: return null
+        val y = m.groupValues[3].toIntOrNull() ?: return null
+        return Triple(d.coerceIn(1, 31), mo.coerceIn(1, 12), y)
+    }
+
     actual fun scheduleMedicationNotification(
         id: String,
         catName: String,
@@ -239,24 +248,42 @@ actual object PlatformManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-            if (timeInMillis <= System.currentTimeMillis()) {
-                add(Calendar.DAY_OF_YEAR, 1)
-            }
-        }
-
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val specificDate = extractSpecificDate(medName)
+
         try {
-            am.setInexactRepeating(
-                AlarmManager.RTC_WAKEUP,
-                cal.timeInMillis,
-                AlarmManager.INTERVAL_DAY,
-                pendingIntent
-            )
+            if (specificDate != null) {
+                // Jednorázové upozornění na konkrétní datum (např. veterina / očkování)
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, specificDate.third)
+                    set(Calendar.MONTH, specificDate.second - 1)
+                    set(Calendar.DAY_OF_MONTH, specificDate.first)
+                    set(Calendar.HOUR_OF_DAY, hour)
+                    set(Calendar.MINUTE, minute)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                if (cal.timeInMillis > System.currentTimeMillis()) {
+                    am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pendingIntent)
+                }
+            } else {
+                // Pravidelné denní upozornění (krmení a léky)
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, hour)
+                    set(Calendar.MINUTE, minute)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                    if (timeInMillis <= System.currentTimeMillis()) {
+                        add(Calendar.DAY_OF_YEAR, 1)
+                    }
+                }
+                am.setInexactRepeating(
+                    AlarmManager.RTC_WAKEUP,
+                    cal.timeInMillis,
+                    AlarmManager.INTERVAL_DAY,
+                    pendingIntent
+                )
+            }
         } catch (_: Exception) {
         }
     }
@@ -291,8 +318,11 @@ actual object PlatformManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val smallIconRes = context.applicationInfo.icon.takeIf { it != 0 }
+            ?: android.R.drawable.ic_dialog_info
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(smallIconRes)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))

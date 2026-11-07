@@ -45,6 +45,12 @@ private enum class MainTab(val label: String, val icon: String) {
     ALERTS("Notifikace", "🔔")
 }
 
+private data class PendingDeleteAction(
+    val title: String,
+    val message: String,
+    val onConfirm: () -> Unit
+)
+
 @Composable
 fun App() {
     var appState by remember {
@@ -71,9 +77,10 @@ fun App() {
     var activeTab by remember { mutableStateOf(MainTab.PETS) }
     var selectedCatIdFilter by remember { mutableStateOf<String?>(null) }
 
-    // Dialogy pro přidávání, úpravu, mazání a hlavní Nastavení (⚙️)
+    // Dialogy pro přidávání, úpravu, vážení, mazání a hlavní Nastavení (⚙️)
     var editingCat by remember { mutableStateOf<CatProfile?>(null) }
     var deletingCat by remember { mutableStateOf<CatProfile?>(null) }
+    var weighingCat by remember { mutableStateOf<CatProfile?>(null) }
     var showAddCatDialog by remember { mutableStateOf(false) }
 
     var showFoodDialog by remember { mutableStateOf(false) }
@@ -87,6 +94,7 @@ fun App() {
 
     var showAddHealthLogDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var pendingDeleteAction by remember { mutableStateOf<PendingDeleteAction?>(null) }
     var bannerMessage by remember { mutableStateOf<String?>(null) }
 
     fun persistAndSync(newState: CatAppState, toastMsg: String? = null) {
@@ -167,7 +175,7 @@ fun App() {
             isSyncing = false
             if (ok && !remoteJson.isNullOrBlank() && remoteJson != "null") {
                 val remoteState = CatDataSerializer.deserialize(remoteJson)
-                if (remoteState != null && remoteState.cats.isNotEmpty()) {
+                if (remoteState != null) {
                     appState = remoteState
                     PlatformManager.saveLocalData(CatDataSerializer.serialize(remoteState))
                     scheduleAllActiveNotifications(remoteState)
@@ -199,25 +207,35 @@ fun App() {
         scheduleAllActiveNotifications(appState)
     }
 
-    // Filtrování mazlíčků podle případné volby v Nastavení (Všichni / Kočičky / Pejsci)
-    val modeFilteredPets = remember(appState.cats, appState.preferredSpeciesMode) {
+    // Filtrování mazlíčků podle volby v Nastavení (ALL / CAT / DOG)
+    val visiblePets = remember(appState.cats, appState.preferredSpeciesMode) {
         when (appState.preferredSpeciesMode) {
             "CAT" -> appState.cats.filter { it.species == "CAT" }
             "DOG" -> appState.cats.filter { it.species == "DOG" }
             else -> appState.cats
         }
     }
-    val visiblePets = if (modeFilteredPets.isEmpty()) appState.cats else modeFilteredPets
+    val visiblePetIds = remember(visiblePets) { visiblePets.map { it.id }.toSet() }
+
+    val activeFilterPetIds = remember(visiblePetIds, selectedCatIdFilter) {
+        if (selectedCatIdFilter != null && visiblePetIds.contains(selectedCatIdFilter)) {
+            setOf(selectedCatIdFilter!!)
+        } else {
+            visiblePetIds
+        }
+    }
 
     val unreadNotifCount = appState.notifications.count { !it.isRead }
     val todayStr = PlatformManager.currentDateString()
-    val pendingFoodsToday = appState.foods.count { it.lastFedDate != todayStr }
-    val pendingMedsToday = appState.medications.count { it.lastGivenDate != todayStr }
-    val pendingVetCount = appState.vetVisits.count { !it.isCompleted }
-    val petsSubtitle = if (visiblePets.isEmpty()) {
-        "Zatím žádný mazlíček – přidej prvního 🐾"
-    } else {
-        visiblePets.joinToString(" & ") { "${if (it.species == "DOG") "🐶" else "🐱"} ${it.name}" }
+    val pendingFoodsToday = appState.foods.count { activeFilterPetIds.contains(it.catId) && it.lastFedDate != todayStr }
+    val pendingMedsToday = appState.medications.count { activeFilterPetIds.contains(it.catId) && it.lastGivenDate != todayStr }
+    val pendingVetCount = appState.vetVisits.count { activeFilterPetIds.contains(it.catId) && !it.isCompleted }
+
+    val petsSubtitle = when {
+        visiblePets.isNotEmpty() -> visiblePets.joinToString(" & ") { "${if (it.species == "DOG") "🐶" else "🐱"} ${it.name}" }
+        appState.preferredSpeciesMode == "DOG" -> "Zatím žádný pejsek – přidej prvního 🐶"
+        appState.preferredSpeciesMode == "CAT" -> "Zatím žádná kočička – přidej první 🐱"
+        else -> "Zatím žádný mazlíček – přidej prvního 🐾"
     }
 
     MaterialTheme(
@@ -295,20 +313,50 @@ fun App() {
             ) {
                 when (activeTab) {
                     MainTab.PETS -> CatsTabScreen(
-                        cats = visiblePets.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
+                        cats = visiblePets.filter { activeFilterPetIds.contains(it.id) },
                         foods = appState.foods,
                         medications = appState.medications,
                         vetVisits = appState.vetVisits,
                         todayStr = todayStr,
+                        preferredSpeciesMode = appState.preferredSpeciesMode,
                         onEditCat = { editingCat = it },
+                        onWeighCat = { weighingCat = it },
                         onAddCat = { showAddCatDialog = true },
+                        onResetSpeciesFilter = {
+                            selectedCatIdFilter = null
+                            persistAndSync(appState.copy(preferredSpeciesMode = "ALL"), "Zobrazeni všichni mazlíčci 🐾")
+                        },
                         onOpenVetSection = { activeTab = MainTab.STATUS }
                     )
 
                     MainTab.STATUS -> StatusAndLogsTabScreen(
-                        cats = visiblePets.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
-                        vetVisits = appState.vetVisits.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
-                        logs = appState.healthLogs.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
+                        cats = visiblePets.filter { activeFilterPetIds.contains(it.id) },
+                        weightRecords = appState.weightRecords.filter { activeFilterPetIds.contains(it.catId) },
+                        vetVisits = appState.vetVisits.filter { activeFilterPetIds.contains(it.catId) },
+                        logs = appState.healthLogs.filter { activeFilterPetIds.contains(it.catId) },
+                        onWeighCatClick = { weighingCat = it },
+                        onDeleteWeightRecord = { rec ->
+                            pendingDeleteAction = PendingDeleteAction(
+                                title = "Smazat záznam vážení?",
+                                message = "Opravdu chceš smazat vážení ${WeightFormatHelper.formatWeight(rec.weightKg)} kg ze dne ${rec.dateText}?",
+                                onConfirm = {
+                                    val remaining = appState.weightRecords.filterNot { it.id == rec.id }
+                                    val latestForPet = remaining.filter { it.catId == rec.catId }.lastOrNull()
+                                    val updatedCats = if (latestForPet != null) {
+                                        appState.cats.map {
+                                            if (it.id == rec.catId) it.copy(weightKg = WeightFormatHelper.formatWeight(latestForPet.weightKg)) else it
+                                        }
+                                    } else appState.cats
+                                    persistAndSync(
+                                        appState.copy(
+                                            cats = updatedCats,
+                                            weightRecords = remaining
+                                        ),
+                                        "Záznam vážení byl odstraněn."
+                                    )
+                                }
+                            )
+                        },
                         onQuickUpdateCat = { updatedCat, logText ->
                             val newCats = appState.cats.map { if (it.id == updatedCat.id) updatedCat else it }
                             val newLog = HealthLogItem(
@@ -336,35 +384,46 @@ fun App() {
                             editingVetVisit = visit
                             showVetDialog = true
                         },
-                        onCompleteVetVisit = { visit ->
-                            PlatformManager.cancelMedicationNotification(visit.id)
-                            val updatedVisits = appState.vetVisits.map {
-                                if (it.id == visit.id) it.copy(isCompleted = true, notificationsEnabled = false) else it
+                        onToggleCompleteVetVisit = { visit ->
+                            val nextCompleted = !visit.isCompleted
+                            if (nextCompleted) {
+                                PlatformManager.cancelMedicationNotification(visit.id)
+                                val updatedVisits = appState.vetVisits.map {
+                                    if (it.id == visit.id) it.copy(isCompleted = true, notificationsEnabled = false) else it
+                                }
+                                val newLog = HealthLogItem(
+                                    id = "log_${PlatformManager.currentTimeMillis()}",
+                                    catId = visit.catId,
+                                    catName = visit.catName,
+                                    dateText = todayStr,
+                                    title = "Veterina / Očkování splněno: ${visit.title} 🩺",
+                                    detail = "Termín: ${visit.dateText}. ${visit.notes}",
+                                    category = "Veterina"
+                                )
+                                val newNotif = AppNotificationItem(
+                                    id = "notif_${PlatformManager.currentTimeMillis()}",
+                                    title = "🩺 Hotovo: ${visit.title} (${visit.catName})",
+                                    message = "Návštěva lékaře / očkování byla označena jako splněná a zapsána do deníčku.",
+                                    timeText = todayStr,
+                                    isRead = false
+                                )
+                                persistAndSync(
+                                    appState.copy(
+                                        vetVisits = updatedVisits,
+                                        healthLogs = listOf(newLog) + appState.healthLogs,
+                                        notifications = listOf(newNotif) + appState.notifications
+                                    ),
+                                    "Návštěva lékaře pro ${visit.catName} byla splněna!"
+                                )
+                            } else {
+                                val updatedVisits = appState.vetVisits.map {
+                                    if (it.id == visit.id) it.copy(isCompleted = false) else it
+                                }
+                                persistAndSync(
+                                    appState.copy(vetVisits = updatedVisits),
+                                    "Označení splněné návštěvy pro ${visit.catName} bylo vráceno zpět."
+                                )
                             }
-                            val newLog = HealthLogItem(
-                                id = "log_${PlatformManager.currentTimeMillis()}",
-                                catId = visit.catId,
-                                catName = visit.catName,
-                                dateText = todayStr,
-                                title = "Veterina / Očkování splněno: ${visit.title} 🩺",
-                                detail = "Termín: ${visit.dateText}. ${visit.notes}",
-                                category = "Veterina"
-                            )
-                            val newNotif = AppNotificationItem(
-                                id = "notif_${PlatformManager.currentTimeMillis()}",
-                                title = "🩺 Hotovo: ${visit.title} (${visit.catName})",
-                                message = "Návštěva lékaře / očkování byla označena jako splněná a zapsána do deníčku.",
-                                timeText = todayStr,
-                                isRead = false
-                            )
-                            persistAndSync(
-                                appState.copy(
-                                    vetVisits = updatedVisits,
-                                    healthLogs = listOf(newLog) + appState.healthLogs,
-                                    notifications = listOf(newNotif) + appState.notifications
-                                ),
-                                "Návštěva lékaře pro ${visit.catName} byla splněna!"
-                            )
                         },
                         onToggleVetNotification = { visit ->
                             val nextEnabled = !visit.notificationsEnabled
@@ -384,58 +443,85 @@ fun App() {
                             }
                             persistAndSync(
                                 appState.copy(vetVisits = updatedVisits),
-                                if (nextEnabled) "Upozornění na veterinu zapnuto 🔔" else "Upozornění vypnuto 🔕"
+                                if (nextEnabled) "Upozornění na veterinu (${visit.dateText}) zapnuto 🔔" else "Upozornění vypnuto 🔕"
                             )
                         },
                         onDeleteVetVisit = { visit ->
-                            PlatformManager.cancelMedicationNotification(visit.id)
-                            persistAndSync(
-                                appState.copy(vetVisits = appState.vetVisits.filterNot { it.id == visit.id }),
-                                "Termín u lékaře byl odstraněn."
+                            pendingDeleteAction = PendingDeleteAction(
+                                title = "Smazat termín u lékaře?",
+                                message = "Opravdu chceš smazat termín „${visit.title}“ (${visit.dateText}) pro ${visit.catName}?",
+                                onConfirm = {
+                                    PlatformManager.cancelMedicationNotification(visit.id)
+                                    persistAndSync(
+                                        appState.copy(vetVisits = appState.vetVisits.filterNot { it.id == visit.id }),
+                                        "Termín u lékaře byl odstraněn."
+                                    )
+                                }
                             )
                         },
                         onAddHealthLog = { showAddHealthLogDialog = true },
-                        onDeleteLog = { logId ->
-                            persistAndSync(
-                                appState.copy(healthLogs = appState.healthLogs.filterNot { it.id == logId })
+                        onDeleteLog = { logItem ->
+                            pendingDeleteAction = PendingDeleteAction(
+                                title = "Smazat záznam z deníčku?",
+                                message = "Opravdu chceš smazat záznam „${logItem.title}“ pro ${logItem.catName}?",
+                                onConfirm = {
+                                    persistAndSync(
+                                        appState.copy(healthLogs = appState.healthLogs.filterNot { it.id == logItem.id }),
+                                        "Záznam z deníčku byl odstraněn."
+                                    )
+                                }
                             )
                         }
                     )
 
                     MainTab.FOOD -> FoodTabScreen(
-                        foods = appState.foods.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
+                        foods = appState.foods.filter { activeFilterPetIds.contains(it.catId) },
                         todayStr = todayStr,
-                        onMarkFedToday = { food ->
-                            val newRemaining = (food.remainingPortions - 1).coerceAtLeast(0)
-                            val updatedFoods = appState.foods.map {
-                                if (it.id == food.id) {
-                                    it.copy(lastFedDate = todayStr, remainingPortions = newRemaining)
-                                } else it
+                        onToggleFedToday = { food ->
+                            val alreadyFedToday = food.lastFedDate == todayStr
+                            if (!alreadyFedToday) {
+                                val newRemaining = (food.remainingPortions - 1).coerceAtLeast(0)
+                                val updatedFoods = appState.foods.map {
+                                    if (it.id == food.id) {
+                                        it.copy(lastFedDate = todayStr, remainingPortions = newRemaining)
+                                    } else it
+                                }
+                                val newLog = HealthLogItem(
+                                    id = "log_${PlatformManager.currentTimeMillis()}",
+                                    catId = food.catId,
+                                    catName = food.catName,
+                                    dateText = todayStr,
+                                    title = "Nakrmeno: ${food.name} 🥣",
+                                    detail = "Porce: ${food.portion} (zbývá $newRemaining porcí).",
+                                    category = "Jídlo"
+                                )
+                                val newNotif = AppNotificationItem(
+                                    id = "notif_${PlatformManager.currentTimeMillis()}",
+                                    title = "🥣 Nakrmeno: ${food.name} (${food.catName})",
+                                    message = "Porce (${food.portion}) byla dána do mističky.",
+                                    timeText = food.timeOfDay,
+                                    isRead = false
+                                )
+                                persistAndSync(
+                                    appState.copy(
+                                        foods = updatedFoods,
+                                        healthLogs = listOf(newLog) + appState.healthLogs,
+                                        notifications = listOf(newNotif) + appState.notifications
+                                    ),
+                                    "Mňam! Krmení pro ${food.catName} je na dnešek odškrtnuté."
+                                )
+                            } else {
+                                val restoredPortions = food.remainingPortions + 1
+                                val updatedFoods = appState.foods.map {
+                                    if (it.id == food.id) {
+                                        it.copy(lastFedDate = "", remainingPortions = restoredPortions)
+                                    } else it
+                                }
+                                persistAndSync(
+                                    appState.copy(foods = updatedFoods),
+                                    "Dnešní krmení (${food.name}) pro ${food.catName} bylo odznačeno a porce vrácena."
+                                )
                             }
-                            val newLog = HealthLogItem(
-                                id = "log_${PlatformManager.currentTimeMillis()}",
-                                catId = food.catId,
-                                catName = food.catName,
-                                dateText = todayStr,
-                                title = "Nakrmeno: ${food.name} 🥣",
-                                detail = "Porce: ${food.portion} (zbývá $newRemaining porcí).",
-                                category = "Jídlo"
-                            )
-                            val newNotif = AppNotificationItem(
-                                id = "notif_${PlatformManager.currentTimeMillis()}",
-                                title = "🥣 Nakrmeno: ${food.name} (${food.catName})",
-                                message = "Porce (${food.portion}) byla dána do mističky.",
-                                timeText = food.timeOfDay,
-                                isRead = false
-                            )
-                            persistAndSync(
-                                appState.copy(
-                                    foods = updatedFoods,
-                                    healthLogs = listOf(newLog) + appState.healthLogs,
-                                    notifications = listOf(newNotif) + appState.notifications
-                                ),
-                                "Mňam! Krmení pro ${food.catName} je na dnešek odškrtnuté."
-                            )
                         },
                         onToggleNotification = { food ->
                             val nextEnabled = !food.notificationsEnabled
@@ -472,10 +558,16 @@ fun App() {
                             showFoodDialog = true
                         },
                         onDeleteFood = { food ->
-                            PlatformManager.cancelMedicationNotification(food.id)
-                            persistAndSync(
-                                appState.copy(foods = appState.foods.filterNot { it.id == food.id }),
-                                "Položka jídla ${food.name} byla odstraněna."
+                            pendingDeleteAction = PendingDeleteAction(
+                                title = "Smazat položku jídla?",
+                                message = "Opravdu chceš smazat krmení „${food.name}“ pro ${food.catName}?",
+                                onConfirm = {
+                                    PlatformManager.cancelMedicationNotification(food.id)
+                                    persistAndSync(
+                                        appState.copy(foods = appState.foods.filterNot { it.id == food.id }),
+                                        "Položka jídla ${food.name} byla odstraněna."
+                                    )
+                                }
                             )
                         },
                         onAddFoodClick = {
@@ -485,39 +577,53 @@ fun App() {
                     )
 
                     MainTab.MEDS -> MedicationsTabScreen(
-                        medications = appState.medications.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
+                        medications = appState.medications.filter { activeFilterPetIds.contains(it.catId) },
                         todayStr = todayStr,
-                        onMarkGivenToday = { med ->
-                            val newRemaining = (med.remainingDoses - 1).coerceAtLeast(0)
-                            val updatedMeds = appState.medications.map {
-                                if (it.id == med.id) {
-                                    it.copy(lastGivenDate = todayStr, remainingDoses = newRemaining)
-                                } else it
+                        onToggleGivenToday = { med ->
+                            val alreadyGivenToday = med.lastGivenDate == todayStr
+                            if (!alreadyGivenToday) {
+                                val newRemaining = (med.remainingDoses - 1).coerceAtLeast(0)
+                                val updatedMeds = appState.medications.map {
+                                    if (it.id == med.id) {
+                                        it.copy(lastGivenDate = todayStr, remainingDoses = newRemaining)
+                                    } else it
+                                }
+                                val newLog = HealthLogItem(
+                                    id = "log_${PlatformManager.currentTimeMillis()}",
+                                    catId = med.catId,
+                                    catName = med.catName,
+                                    dateText = todayStr,
+                                    title = "Podán lék: ${med.name} 💊",
+                                    detail = "Dávka: ${med.dosage} (zbývá $newRemaining dávek).",
+                                    category = "Lék podán"
+                                )
+                                val newNotif = AppNotificationItem(
+                                    id = "notif_${PlatformManager.currentTimeMillis()}",
+                                    title = "✅ Podáno: ${med.name} (${med.catName})",
+                                    message = "Dnešní dávka (${med.dosage}) byla v pořádku podána.",
+                                    timeText = med.timeOfDay,
+                                    isRead = false
+                                )
+                                persistAndSync(
+                                    appState.copy(
+                                        medications = updatedMeds,
+                                        healthLogs = listOf(newLog) + appState.healthLogs,
+                                        notifications = listOf(newNotif) + appState.notifications
+                                    ),
+                                    "Skvělé! Lék pro ${med.catName} je na dnešek odškrtnutý."
+                                )
+                            } else {
+                                val restoredDoses = med.remainingDoses + 1
+                                val updatedMeds = appState.medications.map {
+                                    if (it.id == med.id) {
+                                        it.copy(lastGivenDate = "", remainingDoses = restoredDoses)
+                                    } else it
+                                }
+                                persistAndSync(
+                                    appState.copy(medications = updatedMeds),
+                                    "Dnešní podání léku (${med.name}) pro ${med.catName} bylo odznačeno a dávka vrácena."
+                                )
                             }
-                            val newLog = HealthLogItem(
-                                id = "log_${PlatformManager.currentTimeMillis()}",
-                                catId = med.catId,
-                                catName = med.catName,
-                                dateText = todayStr,
-                                title = "Podán lék: ${med.name} 💊",
-                                detail = "Dávka: ${med.dosage} (zbývá $newRemaining dávek).",
-                                category = "Lék podán"
-                            )
-                            val newNotif = AppNotificationItem(
-                                id = "notif_${PlatformManager.currentTimeMillis()}",
-                                title = "✅ Podáno: ${med.name} (${med.catName})",
-                                message = "Dnešní dávka (${med.dosage}) byla v pořádku podána.",
-                                timeText = med.timeOfDay,
-                                isRead = false
-                            )
-                            persistAndSync(
-                                appState.copy(
-                                    medications = updatedMeds,
-                                    healthLogs = listOf(newLog) + appState.healthLogs,
-                                    notifications = listOf(newNotif) + appState.notifications
-                                ),
-                                "Skvělé! Lék pro ${med.catName} je na dnešek odškrtnutý."
-                            )
                         },
                         onToggleNotification = { med ->
                             val nextEnabled = !med.notificationsEnabled
@@ -554,10 +660,16 @@ fun App() {
                             showMedDialog = true
                         },
                         onDeleteMed = { med ->
-                            PlatformManager.cancelMedicationNotification(med.id)
-                            persistAndSync(
-                                appState.copy(medications = appState.medications.filterNot { it.id == med.id }),
-                                "Položka ${med.name} byla odstraněna."
+                            pendingDeleteAction = PendingDeleteAction(
+                                title = "Smazat lék nebo vitamín?",
+                                message = "Opravdu chceš smazat položku „${med.name}“ pro ${med.catName}?",
+                                onConfirm = {
+                                    PlatformManager.cancelMedicationNotification(med.id)
+                                    persistAndSync(
+                                        appState.copy(medications = appState.medications.filterNot { it.id == med.id }),
+                                        "Položka ${med.name} byla odstraněna."
+                                    )
+                                }
                             )
                         },
                         onAddMedClick = {
@@ -567,9 +679,9 @@ fun App() {
                     )
 
                     MainTab.ALERTS -> NotificationsTabScreen(
-                        foods = appState.foods,
-                        medications = appState.medications,
-                        vetVisits = appState.vetVisits,
+                        foods = appState.foods.filter { activeFilterPetIds.contains(it.catId) },
+                        medications = appState.medications.filter { activeFilterPetIds.contains(it.catId) },
+                        vetVisits = appState.vetVisits.filter { activeFilterPetIds.contains(it.catId) },
                         notifications = appState.notifications,
                         onTestSystemNotification = {
                             PlatformManager.sendImmediateTestNotification(
@@ -606,9 +718,50 @@ fun App() {
             )
         }
 
+        if (weighingCat != null) {
+            AddWeightRecordDialog(
+                cat = weighingCat!!,
+                onDismiss = { weighingCat = null },
+                onSaveWeight = { targetCat, weightFloat, dateStr, noteStr ->
+                    weighingCat = null
+                    val formattedKg = WeightFormatHelper.formatWeight(weightFloat)
+                    val newRecord = WeightRecord(
+                        id = "w_${PlatformManager.currentTimeMillis()}",
+                        catId = targetCat.id,
+                        dateText = dateStr,
+                        weightKg = weightFloat,
+                        note = noteStr
+                    )
+                    val updatedCats = appState.cats.map {
+                        if (it.id == targetCat.id) {
+                            it.copy(weightKg = formattedKg, lastCheckedDate = dateStr)
+                        } else it
+                    }
+                    val newLog = HealthLogItem(
+                        id = "log_${PlatformManager.currentTimeMillis()}",
+                        catId = targetCat.id,
+                        catName = targetCat.name,
+                        dateText = dateStr,
+                        title = "Vážení mazlíčka: $formattedKg kg ⚖️",
+                        detail = if (noteStr.isNotBlank()) "Váha: $formattedKg kg ($noteStr)." else "Zapsána nová váha $formattedKg kg do grafu.",
+                        category = "Váha"
+                    )
+                    persistAndSync(
+                        appState.copy(
+                            cats = updatedCats,
+                            weightRecords = appState.weightRecords + newRecord,
+                            healthLogs = listOf(newLog) + appState.healthLogs
+                        ),
+                        "Nová váha $formattedKg kg pro ${targetCat.name} byla uložena do grafu!"
+                    )
+                }
+            )
+        }
+
         if (editingCat != null) {
+            val prevCat = editingCat!!
             EditCatDialog(
-                cat = editingCat!!,
+                cat = prevCat,
                 onDismiss = { editingCat = null },
                 onRequestDelete = { catToDelete ->
                     editingCat = null
@@ -625,13 +778,29 @@ fun App() {
                     val updatedVets = appState.vetVisits.map {
                         if (it.catId == updated.id) it.copy(catName = updated.name) else it
                     }
+
+                    val oldW = WeightFormatHelper.parseWeightKg(prevCat.weightKg)
+                    val newW = WeightFormatHelper.parseWeightKg(updated.weightKg)
+                    val updatedWeights = if (newW != null && (oldW == null || kotlin.math.abs(newW - oldW) >= 0.05f)) {
+                        appState.weightRecords + WeightRecord(
+                            id = "w_${PlatformManager.currentTimeMillis()}",
+                            catId = updated.id,
+                            dateText = todayStr,
+                            weightKg = newW,
+                            note = "Upraveno v profilu"
+                        )
+                    } else {
+                        appState.weightRecords
+                    }
+
                     editingCat = null
                     persistAndSync(
                         appState.copy(
                             cats = updatedList,
                             foods = updatedFoods,
                             medications = updatedMeds,
-                            vetVisits = updatedVets
+                            vetVisits = updatedVets,
+                            weightRecords = updatedWeights
                         ),
                         "Profil mazlíčka ${updated.name} (${updated.breed}) byl uložen!"
                     )
@@ -663,7 +832,8 @@ fun App() {
                             foods = appState.foods.filterNot { it.catId == catToRemove.id },
                             medications = appState.medications.filterNot { it.catId == catToRemove.id },
                             vetVisits = appState.vetVisits.filterNot { it.catId == catToRemove.id },
-                            healthLogs = appState.healthLogs.filterNot { it.catId == catToRemove.id }
+                            healthLogs = appState.healthLogs.filterNot { it.catId == catToRemove.id },
+                            weightRecords = appState.weightRecords.filterNot { it.catId == catToRemove.id }
                         ),
                         "Mazlíček ${catToRemove.name} byl smazán."
                     )
@@ -671,13 +841,45 @@ fun App() {
             )
         }
 
+        if (pendingDeleteAction != null) {
+            val action = pendingDeleteAction!!
+            ConfirmDeleteItemDialog(
+                title = action.title,
+                message = action.message,
+                onDismiss = { pendingDeleteAction = null },
+                onConfirm = {
+                    pendingDeleteAction = null
+                    action.onConfirm()
+                }
+            )
+        }
+
         if (showAddCatDialog) {
+            val defaultSp = if (appState.preferredSpeciesMode == "DOG") "DOG" else "CAT"
             AddCatDialog(
+                initialSpecies = defaultSp,
                 onDismiss = { showAddCatDialog = false },
                 onAdd = { newPet ->
                     showAddCatDialog = false
+                    val initialW = WeightFormatHelper.parseWeightKg(newPet.weightKg) ?: 4.0f
+                    val firstWeightRecord = WeightRecord(
+                        id = "w_init_${newPet.id}",
+                        catId = newPet.id,
+                        dateText = todayStr,
+                        weightKg = initialW,
+                        note = "Výchozí váha"
+                    )
+                    val nextMode = if (
+                        (appState.preferredSpeciesMode == "CAT" && newPet.species == "DOG") ||
+                        (appState.preferredSpeciesMode == "DOG" && newPet.species == "CAT")
+                    ) "ALL" else appState.preferredSpeciesMode
+
                     persistAndSync(
-                        appState.copy(cats = appState.cats + newPet),
+                        appState.copy(
+                            cats = appState.cats + newPet,
+                            weightRecords = appState.weightRecords + firstWeightRecord,
+                            preferredSpeciesMode = nextMode
+                        ),
                         "Přidán nový mazlíček ${newPet.name} (${newPet.breed})!"
                     )
                 }
@@ -845,7 +1047,7 @@ fun App() {
                 },
                 onLoginAndDownload = { codeInput, pinInput ->
                     val cleanedCode = codeInput.trim().lowercase().replace(" ", "_")
-                    val cleanedPin = pinInput.trim().replace(" ", "_")
+                    val cleanedPin = pinInput.trim().lowercase().replace(" ", "_")
                     if (cleanedCode.isBlank() || cleanedPin.isBlank()) {
                         bannerMessage = "Zadej prosím Rodinný účet i Rodinné heslo / PIN."
                     } else {
@@ -859,7 +1061,7 @@ fun App() {
                 },
                 onSaveAndUpload = { codeInput, pinInput ->
                     val cleanedCode = codeInput.trim().lowercase().replace(" ", "_")
-                    val cleanedPin = pinInput.trim().replace(" ", "_")
+                    val cleanedPin = pinInput.trim().lowercase().replace(" ", "_")
                     if (cleanedCode.isBlank() || cleanedPin.isBlank()) {
                         bannerMessage = "Pro nahrání na server vyplň Rodinný účet i PIN."
                     } else {
@@ -1074,8 +1276,11 @@ private fun CatsTabScreen(
     medications: List<MedicationItem>,
     vetVisits: List<VetVisitItem>,
     todayStr: String,
+    preferredSpeciesMode: String,
     onEditCat: (CatProfile) -> Unit,
+    onWeighCat: (CatProfile) -> Unit,
     onAddCat: () -> Unit,
+    onResetSpeciesFilter: () -> Unit,
     onOpenVetSection: () -> Unit
 ) {
     LazyColumn(
@@ -1085,6 +1290,56 @@ private fun CatsTabScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
+        if (cats.isEmpty()) {
+            item {
+                Card(
+                    backgroundColor = BgBeigeLight,
+                    shape = RoundedCornerShape(20.dp),
+                    elevation = 3.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.5.dp, SoftBorder, RoundedCornerShape(20.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (preferredSpeciesMode == "DOG") "🐶 Zatím tu není žádný pejsek"
+                            else if (preferredSpeciesMode == "CAT") "🐱 Zatím tu není žádná kočička"
+                            else "🐾 Zatím tu není žádný mazlíček",
+                            color = CocoaBrown,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Přidej si mazlíčka tlačítkem níže, nebo v ⚙️ Nastavení přepni filtr na zobrazení všech zvířátek.",
+                            color = CocoaMuted,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (preferredSpeciesMode != "ALL") {
+                            OutlinedButton(
+                                onClick = onResetSpeciesFilter,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "🐾 Zobrazit všechny mazlíčky",
+                                    color = CocoaBrown,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         items(cats) { cat ->
             val pendingFoodsForCat = foods.count { it.catId == cat.id && it.lastFedDate != todayStr }
             val pendingMedsForCat = medications.count { it.catId == cat.id && it.lastGivenDate != todayStr }
@@ -1107,7 +1362,11 @@ private fun CatsTabScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CatAvatar(cat = cat, size = 80.dp)
+                        CatAvatar(
+                            cat = cat,
+                            size = 80.dp,
+                            modifier = Modifier.clickable { onEditCat(cat) }
+                        )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(
@@ -1300,23 +1559,39 @@ private fun CatsTabScreen(
                             modifier = Modifier.weight(1f)
                         )
 
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
 
-                        Button(
-                            onClick = { onEditCat(cat) },
-                            colors = ButtonDefaults.buttonColors(
-                                backgroundColor = BabyPinkSoft,
-                                contentColor = CocoaBrown
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)
-                        ) {
-                            Text(
-                                text = "✏️ Upravit",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = { onWeighCat(cat) },
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = "⚖️ Zvážit",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+
+                            Button(
+                                onClick = { onEditCat(cat) },
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = BabyPinkSoft,
+                                    contentColor = CocoaBrown
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = "✏️ Upravit",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
@@ -1375,16 +1650,19 @@ private fun StatusMiniBadge(
 @Composable
 private fun StatusAndLogsTabScreen(
     cats: List<CatProfile>,
+    weightRecords: List<WeightRecord>,
     vetVisits: List<VetVisitItem>,
     logs: List<HealthLogItem>,
+    onWeighCatClick: (CatProfile) -> Unit,
+    onDeleteWeightRecord: (WeightRecord) -> Unit,
     onQuickUpdateCat: (CatProfile, String) -> Unit,
     onAddVetVisitClick: () -> Unit,
     onEditVetVisit: (VetVisitItem) -> Unit,
-    onCompleteVetVisit: (VetVisitItem) -> Unit,
+    onToggleCompleteVetVisit: (VetVisitItem) -> Unit,
     onToggleVetNotification: (VetVisitItem) -> Unit,
     onDeleteVetVisit: (VetVisitItem) -> Unit,
     onAddHealthLog: () -> Unit,
-    onDeleteLog: (String) -> Unit
+    onDeleteLog: (HealthLogItem) -> Unit
 ) {
     val moodOptions = listOf("Mazlivá 💕", "Hravá 🐾", "Veselá 🎾", "Ospalá 😴", "Klidná 🌸")
     val appetiteOptions = listOf("Výborná 🐟", "Velký jedlík 🥩", "Mlsná 🥣", "Menší chuť 🐾")
@@ -1397,8 +1675,36 @@ private fun StatusAndLogsTabScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
-        // Sekce: Plánované návštěvy lékaře a očkování
+        // Sekce 1: Graf vývoje váhy a kondice
         item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "📊 Graf vývoje váhy a kondice",
+                    color = CocoaBrown,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "Sleduj váhu v čase a zaznamenej každé nové vážení jedním klepnutím",
+                    color = CocoaMuted,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        items(cats) { cat ->
+            val petRecords = weightRecords.filter { it.catId == cat.id }
+            PetWeightAndVitalityChart(
+                cat = cat,
+                records = petRecords,
+                onAddWeightClick = { onWeighCatClick(cat) },
+                onDeleteWeightRecord = { onDeleteWeightRecord(it) }
+            )
+        }
+
+        // Sekce 2: Plánované návštěvy lékaře a očkování
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "🩺 Plánované návštěvy lékaře a očkování",
@@ -1545,20 +1851,17 @@ private fun StatusAndLogsTabScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
-                            onClick = { onCompleteVetVisit(visit) },
-                            enabled = !visit.isCompleted,
+                            onClick = { onToggleCompleteVetVisit(visit) },
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = if (visit.isCompleted) MintSuccess else BabyPinkAccent,
-                                contentColor = Color.White,
-                                disabledBackgroundColor = MintSuccess.copy(alpha = 0.8f),
-                                disabledContentColor = Color.White
+                                contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = if (visit.isCompleted) "✅ Návštěva proběhla" else "🩺 Označit: Splněno",
+                                text = if (visit.isCompleted) "✅ Návštěva proběhla (zrušit)" else "🩺 Označit: Splněno",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center
@@ -1585,7 +1888,7 @@ private fun StatusAndLogsTabScreen(
             }
         }
 
-        // Sekce: Rychlé přepnutí denního stavu
+        // Sekce 3: Rychlé přepnutí denního stavu
         item {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -1711,7 +2014,7 @@ private fun StatusAndLogsTabScreen(
             }
         }
 
-        // Sekce: Historie a deníček zdraví
+        // Sekce 4: Historie a deníček zdraví
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -1793,7 +2096,7 @@ private fun StatusAndLogsTabScreen(
                         text = "🗑️",
                         fontSize = 15.sp,
                         modifier = Modifier
-                            .clickable { onDeleteLog(log.id) }
+                            .clickable { onDeleteLog(log) }
                             .padding(6.dp)
                     )
                 }
@@ -1806,7 +2109,7 @@ private fun StatusAndLogsTabScreen(
 private fun FoodTabScreen(
     foods: List<FoodItem>,
     todayStr: String,
-    onMarkFedToday: (FoodItem) -> Unit,
+    onToggleFedToday: (FoodItem) -> Unit,
     onToggleNotification: (FoodItem) -> Unit,
     onRefillPortions: (FoodItem) -> Unit,
     onEditFood: (FoodItem) -> Unit,
@@ -2003,20 +2306,17 @@ private fun FoodTabScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
-                            onClick = { onMarkFedToday(food) },
-                            enabled = !fedToday,
+                            onClick = { onToggleFedToday(food) },
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = if (fedToday) MintSuccess else BabyPinkAccent,
-                                contentColor = Color.White,
-                                disabledBackgroundColor = MintSuccess.copy(alpha = 0.8f),
-                                disabledContentColor = Color.White
+                                contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = if (fedToday) "✅ Dnes nakrmeno" else "🥣 Dnes nakrmeno",
+                                text = if (fedToday) "✅ Dnes nakrmeno (zrušit)" else "🥣 Dnes nakrmeno",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center
@@ -2047,7 +2347,7 @@ private fun FoodTabScreen(
 private fun MedicationsTabScreen(
     medications: List<MedicationItem>,
     todayStr: String,
-    onMarkGivenToday: (MedicationItem) -> Unit,
+    onToggleGivenToday: (MedicationItem) -> Unit,
     onToggleNotification: (MedicationItem) -> Unit,
     onRefillDoses: (MedicationItem) -> Unit,
     onEditMed: (MedicationItem) -> Unit,
@@ -2244,20 +2544,17 @@ private fun MedicationsTabScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
-                            onClick = { onMarkGivenToday(med) },
-                            enabled = !givenToday,
+                            onClick = { onToggleGivenToday(med) },
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = if (givenToday) MintSuccess else BabyPinkAccent,
-                                contentColor = Color.White,
-                                disabledBackgroundColor = MintSuccess.copy(alpha = 0.8f),
-                                disabledContentColor = Color.White
+                                contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = if (givenToday) "✅ Dnes podáno" else "💊 Dnes podáno",
+                                text = if (givenToday) "✅ Dnes podáno (zrušit)" else "💊 Dnes podáno",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center
@@ -2586,6 +2883,167 @@ private fun BottomNavigationAndFooter(
                     .fillMaxWidth()
                     .padding(bottom = 5.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun AddWeightRecordDialog(
+    cat: CatProfile,
+    onDismiss: () -> Unit,
+    onSaveWeight: (CatProfile, Float, String, String) -> Unit
+) {
+    var weightText by remember { mutableStateOf(cat.weightKg) }
+    var dateText by remember { mutableStateOf(PlatformManager.currentDateString()) }
+    var noteText by remember { mutableStateOf("") }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            backgroundColor = BgBeigeLight,
+            shape = RoundedCornerShape(20.dp),
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "⚖️ Zvážit mazlíčka: ${cat.name}",
+                    color = CocoaBrown,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Zadej novou váhu v kilogramech. Hodnota se automaticky přidá do grafu váhy a aktualizuje profil mazlíčka.",
+                    color = CocoaMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = weightText,
+                        onValueChange = {
+                            weightText = it
+                            errorText = null
+                        },
+                        label = { Text("Váha v kg (např. 4.3)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = dateText,
+                        onValueChange = { dateText = it },
+                        label = { Text("Datum vážení") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = noteText,
+                    onValueChange = { noteText = it },
+                    label = { Text("Poznámka (nepovinné, např. Po krmení / Na veterině)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (errorText != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = errorText!!,
+                        color = Color(0xFFD32F2F),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Zrušit", color = CocoaMuted)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            val parsed = WeightFormatHelper.parseWeightKg(weightText)
+                            if (parsed == null) {
+                                errorText = "⚠️ Zadej prosím platnou váhu v kg (např. 4.2)!"
+                            } else {
+                                onSaveWeight(
+                                    cat,
+                                    parsed,
+                                    dateText.trim().ifBlank { PlatformManager.currentDateString() },
+                                    noteText.trim()
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
+                    ) {
+                        Text("Uložit do grafu 📊", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteItemDialog(
+    title: String,
+    message: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            backgroundColor = BgBeigeLight,
+            shape = RoundedCornerShape(20.dp),
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, BabyPinkDeep, RoundedCornerShape(20.dp))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "🗑️ $title",
+                    color = CocoaBrown,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = message,
+                    color = CocoaMuted,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Zrušit", color = CocoaMuted, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkDeep)
+                    ) {
+                        Text("🗑️ Smazat", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }
@@ -2975,6 +3433,10 @@ private fun EditCatDialog(
                                 validationError = "⚠️ Vyplň prosím povinnou položku Rasa / Plemeno!"
                             } else {
                                 val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: cat.ageText
+                                val normalizedW = WeightFormatHelper.parseWeightKg(weightKg)?.let {
+                                    WeightFormatHelper.formatWeight(it)
+                                } ?: weightKg.ifBlank { "4.0" }
+
                                 onSave(
                                     cat.copy(
                                         name = name.trim().ifBlank { cat.name },
@@ -2983,7 +3445,7 @@ private fun EditCatDialog(
                                         photoBase64 = photoBase64,
                                         birthDate = birthDate.ifBlank { cat.birthDate },
                                         ageText = computedActual,
-                                        weightKg = weightKg.ifBlank { "4.0" },
+                                        weightKg = normalizedW,
                                         furStatus = furStatus.ifBlank { "Hebká ✨" },
                                         insuranceName = insuranceName.trim(),
                                         insuranceFrom = insuranceFrom.trim(),
@@ -3031,7 +3493,7 @@ private fun DeleteCatConfirmDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Opravdu chceš smazat mazlíčka ${cat.name} (${cat.breed})? Spolu s ním se odstraní i jeho položky krmení, léků a veteriny.",
+                    text = "Opravdu chceš smazat mazlíčka ${cat.name} (${cat.breed})? Spolu s ním se odstraní i jeho položky krmení, léků, vážení a veteriny.",
                     color = CocoaMuted,
                     fontSize = 12.sp
                 )
@@ -3058,17 +3520,20 @@ private fun DeleteCatConfirmDialog(
 
 @Composable
 private fun AddCatDialog(
+    initialSpecies: String = "CAT",
     onDismiss: () -> Unit,
     onAdd: (CatProfile) -> Unit
 ) {
-    var species by remember { mutableStateOf("CAT") }
+    var species by remember { mutableStateOf(initialSpecies) }
     var name by remember { mutableStateOf("") }
     var breed by remember { mutableStateOf("") }
-    var selectedBreedType by remember { mutableStateOf("RAGDOLL") }
+    var selectedBreedType by remember {
+        mutableStateOf(if (initialSpecies == "DOG") "DOG_MEDIUM" else "RAGDOLL")
+    }
     var breedSize by remember { mutableStateOf("MEDIUM") }
     var photoBase64 by remember { mutableStateOf("") }
     var birthDate by remember { mutableStateOf("1. 5. 2025") }
-    var weightKg by remember { mutableStateOf("3.8") }
+    var weightKg by remember { mutableStateOf(if (initialSpecies == "DOG") "12.0" else "3.8") }
     var insuranceName by remember { mutableStateOf("PetExpert") }
     var insuranceFrom by remember { mutableStateOf("1. 1. 2026") }
     var insuranceTo by remember { mutableStateOf("31. 12. 2026") }
@@ -3406,6 +3871,10 @@ private fun AddCatDialog(
                             } else {
                                 val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: "1 rok"
                                 val defaultName = if (species == "DOG") "Bady" else "Micka"
+                                val normalizedW = WeightFormatHelper.parseWeightKg(weightKg)?.let {
+                                    WeightFormatHelper.formatWeight(it)
+                                } ?: if (species == "DOG") "12.0" else "4.0"
+
                                 onAdd(
                                     CatProfile(
                                         id = "pet_${PlatformManager.currentTimeMillis()}",
@@ -3413,7 +3882,7 @@ private fun AddCatDialog(
                                         breed = breed.trim(),
                                         breedType = selectedBreedType,
                                         ageText = computedActual,
-                                        weightKg = weightKg.ifBlank { if (species == "DOG") "12.0" else "4.0" },
+                                        weightKg = normalizedW,
                                         mood = if (species == "DOG") "Veselá 🎾" else "Mazlivá 💕",
                                         appetite = "Výborná 🐟",
                                         waterIntake = "Pije pravidelně 💧",
@@ -3469,7 +3938,11 @@ private fun AddOrEditVetVisitDialog(
                 .fillMaxWidth()
                 .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = if (isEdit) "✏️ Upravit termín u lékaře" else "🩺 Naplánovat očkování / veterinu",
                     color = CocoaBrown,
@@ -3513,7 +3986,7 @@ private fun AddOrEditVetVisitDialog(
                     OutlinedTextField(
                         value = dateText,
                         onValueChange = { dateText = it },
-                        label = { Text("Datum (např. 20. 11. 2026)") },
+                        label = { Text("Datum (DD. M. RRRR)") },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
@@ -3603,7 +4076,11 @@ private fun AddOrEditFoodDialog(
                 .fillMaxWidth()
                 .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = if (isEdit) "✏️ Upravit krmení" else "🥣 Přidat jídlo nebo kapsičku",
                     color = CocoaBrown,
@@ -3760,7 +4237,11 @@ private fun AddOrEditMedicationDialog(
                 .fillMaxWidth()
                 .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = if (isEdit) "✏️ Upravit lék nebo vitamín" else "💊 Přidat lék nebo vitamín",
                     color = CocoaBrown,
@@ -3909,7 +4390,11 @@ private fun AddHealthLogDialog(
                 .fillMaxWidth()
                 .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = "📖 Nový záznam do deníčku",
                     color = CocoaBrown,
@@ -4135,7 +4620,7 @@ private fun SettingsAndSyncDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "${if (pet.species == "DOG") "🐶" else "🐱"} ${pet.name} (${pet.breed})",
+                            text = "${if (pet.species == "DOG") "🐶" else "🐱"} ${pet.name} (${pet.breed} • ${pet.weightKg} kg)",
                             color = CocoaBrown,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,

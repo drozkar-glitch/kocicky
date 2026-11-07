@@ -4,42 +4,70 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Ouška -->
-    <path
-        android:fillColor="#5C4033"
-        android:pathData="M31,46 L27,25 L45,35 Z" />
-    <path
-        android:fillColor="#5C4033"
-        android:pathData="M77,46 L81,25 L63,35 Z" />
-    <path
-        android:fillColor="#F4A7B9"
-        android:pathData="M33,43 L30,29 L42,36 Z" />
-    <path
-        android:fillColor="#F4A7B9"
-        android:pathData="M75,43 L78,29 L66,36 Z" />
-    <!-- Hlavička kočičky v béžovém tónu -->
-    <path
-        android:fillColor="#FDFBF7"
-        android:pathData="M54,56m-24,0a24,21 0,1 1,48 0a24,21 0,1 1,-48 0" />
-    <!-- Safírové očičko vlevo a vpravo -->
-    <path
-        android:fillColor="#3A7CA5"
-        android:pathData="M44,53m-4.2,0a4.2,4.2 0,1 1,8.4 0a4.2,4.2 0,1 1,-8.4 0" />
-    <path
-        android:fillColor="#3A7CA5"
-        android:pathData="M64,53m-4.2,0a4.2,4.2 0,1 1,8.4 0a4.2,4.2 0,1 1,-8.4 0" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M42.8,51.5m-1.3,0a1.3,1.3 0,1 1,2.6 0a1.3,1.3 0,1 1,-2.6 0" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M62.8,51.5m-1.3,0a1.3,1.3 0,1 1,2.6 0a1.3,1.3 0,1 1,-2.6 0" />
-    <!-- Růžový čumáček -->
-    <path
-        android:fillColor="#E78FB3"
-        android:pathData="M51,59 L57,59 L54,63 Z" />
-    <!-- Srdíčko nahoře -->
+
+    <!-- Srdíčko nahoře uprostřed -->
     <path
         android:fillColor="#E06C9F"
-        android:pathData="M54,28 C51,24 46,25 46,29 C46,33 54,37 54,37 C54,37 62,33 62,29 C62,25 57,24 54,28 Z" />
+        android:pathData="M54,25 C51.5,21.5 47,22.2 47,25.8 C47,29.2 54,32.8 54,32.8 C54,32.8 61,29.2 61,25.8 C61,22.2 56.5,21.5 54,25 Z" />
+
+    <!-- VLEVO: Kočička -->
+    <!-- Kočičí ouška -->
+    <path
+        android:fillColor="#5C4033"
+        android:pathData="M24,49 L21,33 L34,41 Z" />
+    <path
+        android:fillColor="#5C4033"
+        android:pathData="M48,49 L51,33 L38,41 Z" />
+    <path
+        android:fillColor="#F4A7B9"
+        android:pathData="M25.5,47 L23.5,36.5 L32,42 Z" />
+    <path
+        android:fillColor="#F4A7B9"
+        android:pathData="M46.5,47 L48.5,36.5 L40,42 Z" />
+    <!-- Hlavička kočičky -->
+    <path
+        android:fillColor="#FDFBF7"
+        android:pathData="M36,57m-15,0a15,13.5 0,1 1,30 0a15,13.5 0,1 1,-30 0" />
+    <!-- Modrá očička kočičky -->
+    <path
+        android:fillColor="#3A7CA5"
+        android:pathData="M30,55m-2.7,0a2.7,2.7 0,1 1,5.4 0a2.7,2.7 0,1 1,-5.4 0" />
+    <path
+        android:fillColor="#3A7CA5"
+        android:pathData="M42,55m-2.7,0a2.7,2.7 0,1 1,5.4 0a2.7,2.7 0,1 1,-5.4 0" />
+    <!-- Růžový čumáček kočičky -->
+    <path
+        android:fillColor="#E78FB3"
+        android:pathData="M34,59.5 L38,59.5 L36,62.2 Z" />
+
+    <!-- VPRAVO: Pejsek -->
+    <!-- Klapací psí ouška -->
+    <path
+        android:fillColor="#8C583A"
+        android:pathData="M56,55m-5,0a5,10 0,1 1,10 0a5,10 0,1 1,-10 0" />
+    <path
+        android:fillColor="#8C583A"
+        android:pathData="M84,55m-5,0a5,10 0,1 1,10 0a5,10 0,1 1,-10 0" />
+    <!-- Hlavička pejska -->
+    <path
+        android:fillColor="#D99B66"
+        android:pathData="M70,57m-14.5,0a14.5,13.5 0,1 1,29 0a14.5,13.5 0,1 1,-29 0" />
+    <!-- Světlý čumáček pejska -->
+    <path
+        android:fillColor="#FFF5EB"
+        android:pathData="M70,61.5m-8,0a8,5.5 0,1 1,16 0a8,5.5 0,1 1,-16 0" />
+    <!-- Očička pejska -->
+    <path
+        android:fillColor="#3B2314"
+        android:pathData="M64.5,54.5m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+    <path
+        android:fillColor="#3B2314"
+        android:pathData="M75.5,54.5m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+    <!-- Černý čumák a růžový jazýček pejska -->
+    <path
+        android:fillColor="#2D1E17"
+        android:pathData="M70,59.5m-3,0a3,2.1 0,1 1,6 0a3,2.1 0,1 1,-6 0" />
+    <path
+        android:fillColor="#F28B9C"
+        android:pathData="M70,64.2m-2,0a2,2.8 0,1 1,4 0a2,2.8 0,1 1,-4 0" />
 </vector>

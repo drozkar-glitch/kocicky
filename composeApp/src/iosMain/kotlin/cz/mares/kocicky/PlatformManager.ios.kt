@@ -14,7 +14,6 @@ import platform.posix.memcpy
 
 @OptIn(ExperimentalForeignApi::class)
 actual object PlatformManager {
-
     private const val KEY_STATE_JSON = "terezciny_kocicky_state_v1"
     private const val KEY_FAMILY_CODE = "terezciny_kocicky_family_v2"
     private const val KEY_FAMILY_PIN = "terezciny_kocicky_pin_v2"
@@ -45,7 +44,7 @@ actual object PlatformManager {
     }
 
     private fun sanitizeKey(raw: String): String {
-        return raw.trim()
+        return raw.trim().lowercase()
             .replace(".", "_")
             .replace("#", "_")
             .replace("$", "_")
@@ -61,27 +60,24 @@ actual object PlatformManager {
         jsonPayload: String,
         onResult: (Boolean, String) -> Unit
     ) {
-        val cleanCode = sanitizeKey(familyCode).lowercase()
+        val cleanCode = sanitizeKey(familyCode)
         val cleanPin = sanitizeKey(familyPin)
         if (cleanCode.isBlank() || cleanPin.isBlank()) {
             onResult(false, "Nepřihlášeno")
             return
         }
-
         val urlStr = "$FIREBASE_BASE/kocicky/$cleanCode/$cleanPin.json"
         val nsUrl = NSURL.URLWithString(urlStr)
         if (nsUrl == null) {
             onResult(false, "URL")
             return
         }
-
         val req = NSMutableURLRequest.requestWithURL(nsUrl).apply {
             setHTTPMethod("PUT")
             setValue("application/json; charset=UTF-8", forHTTPHeaderField = "Content-Type")
             val bodyData = (jsonPayload as NSString).dataUsingEncoding(NSUTF8StringEncoding)
             setHTTPBody(bodyData)
         }
-
         val task = NSURLSession.sharedSession.dataTaskWithRequest(req) { _, response, error ->
             val httpResp = response as? NSHTTPURLResponse
             val code = httpResp?.statusCode ?: 0L
@@ -98,24 +94,21 @@ actual object PlatformManager {
         familyPin: String,
         onResult: (Boolean, String?, String) -> Unit
     ) {
-        val cleanCode = sanitizeKey(familyCode).lowercase()
+        val cleanCode = sanitizeKey(familyCode)
         val cleanPin = sanitizeKey(familyPin)
         if (cleanCode.isBlank() || cleanPin.isBlank()) {
             onResult(false, null, "Nepřihlášeno")
             return
         }
-
         val urlStr = "$FIREBASE_BASE/kocicky/$cleanCode/$cleanPin.json"
         val nsUrl = NSURL.URLWithString(urlStr)
         if (nsUrl == null) {
             onResult(false, null, "URL")
             return
         }
-
         val req = NSMutableURLRequest.requestWithURL(nsUrl).apply {
             setHTTPMethod("GET")
         }
-
         val task = NSURLSession.sharedSession.dataTaskWithRequest(req) { data, response, error ->
             val httpResp = response as? NSHTTPURLResponse
             val code = httpResp?.statusCode ?: 0L
@@ -150,6 +143,15 @@ actual object PlatformManager {
         }
     }
 
+    private fun extractSpecificDate(text: String): Triple<Long, Long, Long>? {
+        val regex = Regex("""(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})""")
+        val m = regex.find(text) ?: return null
+        val d = m.groupValues[1].toLongOrNull() ?: return null
+        val mo = m.groupValues[2].toLongOrNull() ?: return null
+        val y = m.groupValues[3].toLongOrNull() ?: return null
+        return Triple(d.coerceIn(1L, 31L), mo.coerceIn(1L, 12L), y)
+    }
+
     actual fun scheduleMedicationNotification(
         id: String,
         catName: String,
@@ -165,20 +167,26 @@ actual object PlatformManager {
                 val parts = timeHhMm.split(":")
                 val hour = parts.getOrNull(0)?.trim()?.toLongOrNull() ?: 8L
                 val minute = parts.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
+                val specificDate = extractSpecificDate(medName)
 
                 val content = UNMutableNotificationContent().apply {
-                    setTitle("💊 Lék pro kočičku: $catName")
-                    setBody("$medName – $dosage")
+                    setTitle("🐾 $catName – $medName")
+                    setBody("Čas ($timeHhMm): $dosage")
                 }
 
                 val dateComps = NSDateComponents().apply {
+                    if (specificDate != null) {
+                        setDay(specificDate.first)
+                        setMonth(specificDate.second)
+                        setYear(specificDate.third)
+                    }
                     setHour(hour)
                     setMinute(minute)
                 }
 
                 val trigger = UNCalendarNotificationTrigger.triggerWithDateMatchingComponents(
                     dateComps,
-                    repeats = true
+                    repeats = (specificDate == null)
                 )
                 val request = UNNotificationRequest.requestWithIdentifier(id, content, trigger)
                 center.addNotificationRequest(request, withCompletionHandler = null)
