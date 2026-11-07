@@ -4,10 +4,10 @@ import java.util.Properties
 import java.io.FileInputStream
 
 plugins {
-    id("org.jetbrains.kotlin.multiplatform")
-    id("com.android.application")
-    id("org.jetbrains.compose")
-    id("org.jetbrains.kotlin.plugin.compose")
+    alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.jetbrainsCompose)
+    alias(libs.plugins.compose.compiler)
 }
 
 kotlin {
@@ -32,8 +32,7 @@ kotlin {
     sourceSets {
         androidMain.dependencies {
             implementation(compose.preview)
-            implementation("androidx.activity:activity-compose:1.9.3")
-            implementation("androidx.core:core-ktx:1.13.1")
+            implementation(libs.androidx.activity.compose)
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -46,81 +45,94 @@ kotlin {
     }
 }
 
+val keystoreProps = Properties()
+val keystorePropsFile = rootProject.file("keystore.properties").let {
+    if (it.exists()) it else rootProject.file("android_keystore.props")
+}
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(FileInputStream(keystorePropsFile))
+}
+
+fun getSigningValue(envKeys: List<String>, propKeys: List<String>): String? {
+    for (k in envKeys) {
+        val v = System.getenv(k)?.trim()
+        if (!v.isNullOrEmpty()) return v
+    }
+    for (k in propKeys) {
+        val v = keystoreProps.getProperty(k)?.trim()
+        if (!v.isNullOrEmpty()) return v
+    }
+    return null
+}
+
+val resolvedKeystorePath = getSigningValue(
+    listOf("CM_KEYSTORE_PATH", "STORE_FILE", "KEYSTORE_FILE", "ANDROID_KEYSTORE_PATH"),
+    listOf("storeFile", "CM_KEYSTORE_PATH", "STORE_FILE")
+)
+val resolvedKeystorePassword = getSigningValue(
+    listOf("CM_KEYSTORE_PASSWORD", "STORE_PASSWORD", "KEYSTORE_PASSWORD", "ANDROID_KEYSTORE_PASSWORD"),
+    listOf("storePassword", "CM_KEYSTORE_PASSWORD", "STORE_PASSWORD")
+)
+val resolvedKeyAlias = getSigningValue(
+    listOf("CM_KEY_ALIAS", "KEY_ALIAS", "ANDROID_KEY_ALIAS"),
+    listOf("keyAlias", "CM_KEY_ALIAS", "KEY_ALIAS")
+)
+val resolvedKeyPassword = getSigningValue(
+    listOf("CM_KEY_PASSWORD", "KEY_PASSWORD", "ANDROID_KEY_PASSWORD"),
+    listOf("keyPassword", "CM_KEY_PASSWORD", "KEY_PASSWORD")
+) ?: resolvedKeystorePassword
+
+val ciBuildNumber = System.getenv("BUILD_NUM")?.toIntOrNull()
+    ?: System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(100)
+    ?: 101
+val appVer = System.getenv("APP_VERSION")?.takeIf { it.isNotBlank() } ?: "1.0"
+
 android {
     namespace = "cz.mares.kocicky"
     compileSdk = 36
+
+    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+    sourceSets["main"].res.srcDirs("src/androidMain/res")
+    sourceSets["main"].resources.srcDirs("src/commonMain/resources")
 
     defaultConfig {
         applicationId = "cz.mares.kocicky"
         minSdk = 24
         targetSdk = 36
-
-        val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
-        val ciBuildNumber = System.getenv("BUILD_NUM")?.toIntOrNull()
-            ?: if (runNumber != null) (runNumber + 100) else 101
-        val appVer = System.getenv("APP_VERSION")?.takeIf { it.isNotBlank() } ?: "1.0"
-
         versionCode = ciBuildNumber
         versionName = "$appVer.$ciBuildNumber"
     }
 
     signingConfigs {
         create("release") {
-            val props = Properties()
-            val propFiles = listOf(
-                rootProject.file("keystore.properties"),
-                rootProject.file("android_keystore.props"),
-                file("keystore.properties")
-            )
-            for (pf in propFiles) {
-                if (pf.exists()) {
-                    FileInputStream(pf).use { props.load(it) }
-                    break
-                }
+            val ksFile = resolvedKeystorePath?.let { File(it) }
+            if (ksFile != null && ksFile.exists() && !resolvedKeystorePassword.isNullOrEmpty() && !resolvedKeyAlias.isNullOrEmpty()) {
+                storeFile = ksFile
+                storePassword = resolvedKeystorePassword
+                keyAlias = resolvedKeyAlias
+                keyPassword = resolvedKeyPassword
             }
+        }
+    }
 
-            val envKeystorePath = System.getenv("CM_KEYSTORE_PATH")
-                ?: System.getenv("ANDROID_KEYSTORE_PATH")
-                ?: System.getenv("KEYSTORE_FILE")
-                ?: System.getenv("STORE_FILE")
-                ?: props.getProperty("storeFile")
-
-            if (!envKeystorePath.isNullOrBlank()) {
-                val ksFile = file(envKeystorePath)
-                val rootKsFile = rootProject.file(envKeystorePath)
-                storeFile = when {
-                    ksFile.exists() -> ksFile
-                    rootKsFile.exists() -> rootKsFile
-                    else -> ksFile
-                }
-                storePassword = System.getenv("CM_KEYSTORE_PASSWORD")
-                    ?: System.getenv("KEYSTORE_PASSWORD")
-                    ?: System.getenv("STORE_PASSWORD")
-                    ?: props.getProperty("storePassword")
-                keyAlias = System.getenv("CM_KEY_ALIAS")
-                    ?: System.getenv("KEY_ALIAS")
-                    ?: props.getProperty("keyAlias")
-                keyPassword = System.getenv("CM_KEY_PASSWORD")
-                    ?: System.getenv("KEY_PASSWORD")
-                    ?: props.getProperty("keyPassword")
-            }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
 
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
-            val releaseConfig = signingConfigs.getByName("release")
-            signingConfig = if (releaseConfig.storeFile != null && releaseConfig.storeFile!!.exists()) {
-                releaseConfig
-            } else {
-                signingConfigs.getByName("debug")
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
+                signingConfig = releaseSigning
             }
         }
         getByName("debug") {
-            val releaseConfig = signingConfigs.getByName("release")
-            if (releaseConfig.storeFile != null && releaseConfig.storeFile!!.exists()) {
-                signingConfig = releaseConfig
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
+                signingConfig = releaseSigning
             }
         }
     }
