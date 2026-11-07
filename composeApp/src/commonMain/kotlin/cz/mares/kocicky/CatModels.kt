@@ -3,8 +3,8 @@ package cz.mares.kocicky
 data class CatProfile(
     val id: String,
     val name: String,
-    val breed: String,
-    val breedType: String, // "RAGDOLL", "MAINE_COON", "OTHER"
+    val breed: String, // Povinná položka: Rasa / Plemeno
+    val breedType: String, // "RAGDOLL", "MAINE_COON", "OTHER", "DOG_SMALL", "DOG_MEDIUM", "DOG_LARGE", "DOG_GIANT"
     val ageText: String,
     val weightKg: String,
     val mood: String,
@@ -18,7 +18,9 @@ data class CatProfile(
     val birthDate: String = "14. 5. 2024",
     val insuranceName: String = "PetExpert",
     val insuranceFrom: String = "1. 1. 2026",
-    val insuranceTo: String = "31. 12. 2026"
+    val insuranceTo: String = "31. 12. 2026",
+    val species: String = "CAT", // "CAT" = Kočka, "DOG" = Pes
+    val breedSize: String = "MEDIUM" // Pro psy: "SMALL" (<10kg), "MEDIUM" (10-25kg), "LARGE" (25-45kg), "GIANT" (>45kg)
 )
 
 data class FoodItem(
@@ -27,8 +29,8 @@ data class FoodItem(
     val catName: String,
     val name: String,
     val portion: String,
-    val timeOfDay: String, // "07:30"
-    val frequency: String, // "Denně", "Obden", "Pamlsek"
+    val timeOfDay: String,
+    val frequency: String,
     val remainingPortions: Int,
     val lastFedDate: String,
     val notificationsEnabled: Boolean
@@ -40,8 +42,8 @@ data class MedicationItem(
     val catName: String,
     val name: String,
     val dosage: String,
-    val timeOfDay: String, // "08:00"
-    val frequency: String, // "Denně", "Obden", "1x týdně", "Podle potřeby"
+    val timeOfDay: String,
+    val frequency: String,
     val remainingDoses: Int,
     val lastGivenDate: String,
     val notificationsEnabled: Boolean
@@ -51,10 +53,10 @@ data class VetVisitItem(
     val id: String,
     val catId: String,
     val catName: String,
-    val title: String, // např. "Roční očkování Purevax"
-    val dateText: String, // např. "20. 11. 2026"
-    val timeOfDay: String, // např. "09:30"
-    val notes: String, // např. "Vzít očkovací průkaz"
+    val title: String,
+    val dateText: String,
+    val timeOfDay: String,
+    val notes: String,
     val isCompleted: Boolean,
     val notificationsEnabled: Boolean
 )
@@ -66,7 +68,7 @@ data class HealthLogItem(
     val dateText: String,
     val title: String,
     val detail: String,
-    val category: String // "Zdraví", "Váha", "Jídlo", "Lék podán", "Péče", "Veterina"
+    val category: String
 )
 
 data class AppNotificationItem(
@@ -84,8 +86,50 @@ data class CatAppState(
     val healthLogs: List<HealthLogItem>,
     val notifications: List<AppNotificationItem>,
     val foods: List<FoodItem> = DefaultCatData.defaultFoods(),
-    val vetVisits: List<VetVisitItem> = DefaultCatData.defaultVetVisits()
+    val vetVisits: List<VetVisitItem> = DefaultCatData.defaultVetVisits(),
+    val preferredSpeciesMode: String = "UNSET" // "UNSET" (zobrazí úvodní volbu), "ALL", "CAT", "DOG"
 )
+
+data class BreedPreset(
+    val label: String,
+    val species: String, // "CAT" nebo "DOG"
+    val breedType: String,
+    val breedSize: String // "SMALL", "MEDIUM", "LARGE", "GIANT"
+)
+
+object PetBreedCatalog {
+    val catPresets = listOf(
+        BreedPreset("Ragdollka", "CAT", "RAGDOLL", "MEDIUM"),
+        BreedPreset("Mainská mývalí", "CAT", "MAINE_COON", "LARGE"),
+        BreedPreset("Britská krátkosrstá", "CAT", "OTHER", "MEDIUM"),
+        BreedPreset("Evropská domácí", "CAT", "OTHER", "MEDIUM"),
+        BreedPreset("Siamská kočka", "CAT", "RAGDOLL", "MEDIUM"),
+        BreedPreset("Sphynx", "CAT", "OTHER", "MEDIUM"),
+        BreedPreset("Bengálská kočka", "CAT", "MAINE_COON", "MEDIUM")
+    )
+
+    val dogPresets = listOf(
+        BreedPreset("Jorkšírský teriér", "DOG", "DOG_SMALL", "SMALL"),
+        BreedPreset("Jezevčík", "DOG", "DOG_SMALL", "SMALL"),
+        BreedPreset("Čivava", "DOG", "DOG_SMALL", "SMALL"),
+        BreedPreset("Francouzský buldoček", "DOG", "DOG_MEDIUM", "MEDIUM"),
+        BreedPreset("Border kolie", "DOG", "DOG_MEDIUM", "MEDIUM"),
+        BreedPreset("Bígl", "DOG", "DOG_MEDIUM", "MEDIUM"),
+        BreedPreset("Zlatý retrívr", "DOG", "DOG_LARGE", "LARGE"),
+        BreedPreset("Labradorský retrívr", "DOG", "DOG_LARGE", "LARGE"),
+        BreedPreset("Německý ovčák", "DOG", "DOG_LARGE", "LARGE"),
+        BreedPreset("Bernský salašnický", "DOG", "DOG_GIANT", "GIANT"),
+        BreedPreset("Německá doga", "DOG", "DOG_GIANT", "GIANT")
+    )
+
+    fun sizeLabelCz(size: String): String = when (size) {
+        "SMALL" -> "malá rasa do 10 kg"
+        "MEDIUM" -> "střední rasa 10–25 kg"
+        "LARGE" -> "velká rasa 25–45 kg"
+        "GIANT" -> "obří rasa nad 45 kg"
+        else -> "střední rasa"
+    }
+}
 
 object CatAgeCalculator {
 
@@ -99,7 +143,6 @@ object CatAgeCalculator {
         val p1 = parts[1].toIntOrNull() ?: return null
         val p2 = parts[2].toIntOrNull() ?: return null
 
-        // Podpora formátu DD.MM.RRRR i RRRR.MM.DD
         return if (p0 > 1900) {
             ParsedDate(day = p2.coerceIn(1, 31), month = p1.coerceIn(1, 12), year = p0)
         } else {
@@ -134,25 +177,68 @@ object CatAgeCalculator {
         }
     }
 
-    fun calculateAnimalHumanYears(birthDate: String, todayDate: String = PlatformManager.currentDateString()): Int? {
+    fun calculateAnimalHumanYears(
+        birthDate: String,
+        species: String = "CAT",
+        breedSize: String = "MEDIUM",
+        todayDate: String = PlatformManager.currentDateString()
+    ): Int? {
         val totalMonths = totalMonthsBetween(birthDate, todayDate) ?: return null
-        return when {
-            totalMonths <= 0 -> 1
-            totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
-            totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
-            else -> 24 + ((totalMonths - 24) * 4) / 12
+        if (totalMonths <= 0) return 1
+
+        return if (species == "DOG") {
+            when (breedSize) {
+                "SMALL" -> when {
+                    totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
+                    totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
+                    else -> 24 + ((totalMonths - 24) * 4) / 12
+                }
+                "MEDIUM" -> when {
+                    totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
+                    totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
+                    else -> 24 + ((totalMonths - 24) * 5) / 12
+                }
+                "LARGE" -> when {
+                    totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
+                    totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
+                    else -> 24 + ((totalMonths - 24) * 6) / 12
+                }
+                "GIANT" -> when {
+                    totalMonths <= 12 -> ((totalMonths * 12) / 12).coerceAtLeast(1)
+                    totalMonths <= 24 -> 12 + ((totalMonths - 12) * 10) / 12
+                    else -> 22 + ((totalMonths - 24) * 7) / 12
+                }
+                else -> when {
+                    totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
+                    totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
+                    else -> 24 + ((totalMonths - 24) * 5) / 12
+                }
+            }
+        } else {
+            // Kočka
+            when {
+                totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
+                totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
+                else -> 24 + ((totalMonths - 24) * 4) / 12
+            }
         }
     }
 
     fun formatFullAgeSummary(
         birthDate: String,
+        species: String = "CAT",
+        breedSize: String = "MEDIUM",
         fallbackAgeText: String = "",
         todayDate: String = PlatformManager.currentDateString()
     ): String {
         val actual = formatActualAge(birthDate, todayDate)
-        val animalYears = calculateAnimalHumanYears(birthDate, todayDate)
+        val animalYears = calculateAnimalHumanYears(birthDate, species, breedSize, todayDate)
         return if (actual != null && animalYears != null) {
-            "$actual (🐾 kočičí věk: ~$animalYears let)"
+            if (species == "DOG") {
+                "$actual (🐶 psí věk: ~$animalYears let)"
+            } else {
+                "$actual (🐱 kočičí věk: ~$animalYears let)"
+            }
         } else {
             fallbackAgeText.ifBlank { "Nezadáno" }
         }
@@ -178,7 +264,7 @@ object DefaultCatData {
             id = "food_zlatin_rano",
             catId = "cat_zlatin",
             catName = "Zlatín",
-            name = "Ranní hovězí kapsička pro kocoury",
+            name = "Ranní hovězí kapsička",
             portion = "1 velká kapsička (100 g)",
             timeOfDay = "07:30",
             frequency = "Denně",
@@ -190,8 +276,8 @@ object DefaultCatData {
             id = "food_safirka_vecer",
             catId = "cat_safirka",
             catName = "Safírka",
-            name = "Večerní granulky Ragdoll & filetky",
-            portion = "45 g do růžové mističky",
+            name = "Večerní granulky & filetky",
+            portion = "45 g do mističky",
             timeOfDay = "18:00",
             frequency = "Denně",
             remainingPortions = 30,
@@ -217,10 +303,10 @@ object DefaultCatData {
             id = "vet_safirka_ockovani",
             catId = "cat_safirka",
             catName = "Safírka",
-            title = "Roční očkování + kontrola kožíšku",
+            title = "Roční očkování + preventivní kontrola",
             dateText = "20. 11. 2026",
             timeOfDay = "09:30",
-            notes = "Vzít očkovací průkaz a oblíbenou dečku do přepravky.",
+            notes = "Vzít očkovací průkaz a oblíbenou dečku.",
             isCompleted = false,
             notificationsEnabled = true
         ),
@@ -228,10 +314,10 @@ object DefaultCatData {
             id = "vet_zlatin_prohlidka",
             catId = "cat_zlatin",
             catName = "Zlatín",
-            title = "Očkování a preventivní kontrola zoubků",
+            title = "Očkování a kontrola zoubků",
             dateText = "4. 12. 2026",
             timeOfDay = "10:00",
-            notes = "Zvážit na veterině, zkontrolovat drápky a ušní štětičky.",
+            notes = "Zvážit na veterině a zkontrolovat drápky.",
             isCompleted = false,
             notificationsEnabled = true
         )
@@ -251,13 +337,15 @@ object DefaultCatData {
             waterIntake = "Pije pravidelně 💧",
             furStatus = "Hebká a načechraná ✨",
             energyLevel = 92,
-            notes = "Modrooká princezna Safírka. Miluje chování v náručí, drbání pod bradičkou a odpočinek na měkkém polštářku.",
+            notes = "Modrooká princezna Safírka. Miluje chování v náručí, drbání pod bradičkou a odpočinek na polštářku.",
             photoBase64 = "",
             lastCheckedDate = today,
             birthDate = "14. 5. 2024",
             insuranceName = "PetExpert",
             insuranceFrom = "1. 1. 2026",
-            insuranceTo = "31. 12. 2026"
+            insuranceTo = "31. 12. 2026",
+            species = "CAT",
+            breedSize = "MEDIUM"
         )
 
         val zlatin = CatProfile(
@@ -272,13 +360,15 @@ object DefaultCatData {
             waterIntake = "Miluje fontánku ⛲",
             furStatus = "Hustá hříva a štětičky 🦁",
             energyLevel = 95,
-            notes = "Majestátní Mainský mývalí kocour s krásnými štětičkami na uších a huňatým ocasem. Rád pozoruje ptáčky a povídá si.",
+            notes = "Majestátní Mainský mývalí kocour s krásnými štětičkami na uších a huňatým ocasem.",
             photoBase64 = "",
             lastCheckedDate = today,
             birthDate = "20. 8. 2023",
             insuranceName = "PetExpert",
             insuranceFrom = "1. 1. 2026",
-            insuranceTo = "31. 12. 2026"
+            insuranceTo = "31. 12. 2026",
+            species = "CAT",
+            breedSize = "LARGE"
         )
 
         val meds = listOf(
@@ -287,7 +377,7 @@ object DefaultCatData {
                 catId = "cat_safirka",
                 catName = "Safírka",
                 name = "Lososový olej & Biotin (na srst)",
-                dosage = "1 čajová lžička do kapsičky",
+                dosage = "1 čajová lžička do krmiva",
                 timeOfDay = "08:00",
                 frequency = "Denně",
                 remainingDoses = 28,
@@ -298,7 +388,7 @@ object DefaultCatData {
                 id = "med_zlatin_pasta",
                 catId = "cat_zlatin",
                 catName = "Zlatín",
-                name = "Sladová pasta (proti bezoárům)",
+                name = "Vitamínová pasta",
                 dosage = "3 cm proužek z tuby",
                 timeOfDay = "18:30",
                 frequency = "Denně",
@@ -322,7 +412,7 @@ object DefaultCatData {
                 id = "med_zlatin_klouby",
                 catId = "cat_zlatin",
                 catName = "Zlatín",
-                name = "Vitamín na klouby (pro velké kočky)",
+                name = "Vitamín na klouby",
                 dosage = "1 pamlsková tableta",
                 timeOfDay = "09:00",
                 frequency = "Denně",
@@ -339,7 +429,7 @@ object DefaultCatData {
                 catName = "Safírka",
                 dateText = today,
                 title = "Pravidelné česání a kontrola váhy",
-                detail = "Safírka váží 4.2 kg, kožíšek má krásně hebký a safírové očička čisté.",
+                detail = "Safírka váží 4.2 kg, kožíšek má krásně hebký a očička čisté.",
                 category = "Péče"
             ),
             HealthLogItem(
@@ -347,8 +437,8 @@ object DefaultCatData {
                 catId = "cat_zlatin",
                 catName = "Zlatín",
                 dateText = today,
-                title = "Kontrola hřívy a drápků",
-                detail = "Zlatín váží 6.8 kg, štětičky na uších v pořádku, snědl celou misku.",
+                title = "Kontrola srsti a drápků",
+                detail = "Zlatín váží 6.8 kg, vše v pořádku, snědl celou misku.",
                 category = "Zdraví"
             )
         )
@@ -356,8 +446,8 @@ object DefaultCatData {
         val notifs = listOf(
             AppNotificationItem(
                 id = "notif_init_1",
-                title = "🐾 Vítej v aplikaci Moje kočičky!",
-                message = "Safírka (Ragdollka) a Zlatín (Mainská mývalí) mají připravené své karty, jídlo, léky, pojištění i termíny u veterináře.",
+                title = "🐾 Vítej v aplikaci Moji mazlíčci!",
+                message = "Sleduj kočičky i pejsky, jejich rasu, přepočet věku, jídlo, léky, pojištění i očkování.",
                 timeText = "08:00",
                 isRead = false
             ),
@@ -377,7 +467,8 @@ object DefaultCatData {
             healthLogs = logs,
             notifications = notifs,
             foods = defaultFoods(),
-            vetVisits = defaultVetVisits()
+            vetVisits = defaultVetVisits(),
+            preferredSpeciesMode = "UNSET"
         )
     }
 }
@@ -425,7 +516,9 @@ object CatDataSerializer {
                 enc(c.birthDate),
                 enc(c.insuranceName),
                 enc(c.insuranceFrom),
-                enc(c.insuranceTo)
+                enc(c.insuranceTo),
+                enc(c.species),
+                enc(c.breedSize)
             ).joinToString("|")
         }
 
@@ -498,6 +591,7 @@ object CatDataSerializer {
         return buildString {
             append("{")
             append("\"updatedAt\":${state.updatedAt},")
+            append("\"speciesMode\":\"${enc(state.preferredSpeciesMode)}\",")
             append("\"catsData\":\"$catsPacked\",")
             append("\"foodsData\":\"$foodsPacked\",")
             append("\"medsData\":\"$medsPacked\",")
@@ -555,6 +649,7 @@ object CatDataSerializer {
         if (json.isBlank() || !json.contains("\"catsData\"")) return null
         return try {
             val updatedAt = extractJsonLong(json, "updatedAt")
+            val speciesMode = extractJsonString(json, "speciesMode") ?: "ALL"
             val catsRaw = extractJsonString(json, "catsData") ?: ""
             val foodsRaw = extractJsonString(json, "foodsData")
             val medsRaw = extractJsonString(json, "medsData") ?: ""
@@ -567,11 +662,24 @@ object CatDataSerializer {
                 if (p.size < 14) null else {
                     val catId = dec(p[0])
                     val defaultDob = if (catId == "cat_zlatin") "20. 8. 2023" else "14. 5. 2024"
+                    val bType = dec(p[3])
+                    val inferredSpecies = if (p.size >= 19 && dec(p[18]).isNotBlank()) {
+                        dec(p[18])
+                    } else if (bType.startsWith("DOG")) {
+                        "DOG"
+                    } else {
+                        "CAT"
+                    }
+                    val inferredSize = if (p.size >= 20 && dec(p[19]).isNotBlank()) {
+                        dec(p[19])
+                    } else {
+                        "MEDIUM"
+                    }
                     CatProfile(
                         id = catId,
                         name = dec(p[1]),
                         breed = dec(p[2]),
-                        breedType = dec(p[3]),
+                        breedType = bType,
                         ageText = dec(p[4]),
                         weightKg = dec(p[5]),
                         mood = dec(p[6]),
@@ -585,7 +693,9 @@ object CatDataSerializer {
                         birthDate = if (p.size >= 15 && dec(p[14]).isNotBlank()) dec(p[14]) else defaultDob,
                         insuranceName = if (p.size >= 16) dec(p[15]) else "PetExpert",
                         insuranceFrom = if (p.size >= 17) dec(p[16]) else "1. 1. 2026",
-                        insuranceTo = if (p.size >= 18) dec(p[17]) else "31. 12. 2026"
+                        insuranceTo = if (p.size >= 18) dec(p[17]) else "31. 12. 2026",
+                        species = inferredSpecies,
+                        breedSize = inferredSize
                     )
                 }
             }
@@ -669,14 +779,15 @@ object CatDataSerializer {
                 )
             }
 
-            if (cats.isEmpty()) null else CatAppState(
+            CatAppState(
                 updatedAt = updatedAt,
                 cats = cats,
                 medications = meds,
                 healthLogs = logs,
                 notifications = notifs,
                 foods = foods,
-                vetVisits = vetVisits
+                vetVisits = vetVisits,
+                preferredSpeciesMode = speciesMode
             )
         } catch (e: Exception) {
             null

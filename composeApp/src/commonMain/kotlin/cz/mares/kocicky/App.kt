@@ -38,7 +38,7 @@ private val MintSuccess = Color(0xFF529E72)
 private val SoftBorder = Color(0xFFF2D0DC)
 
 private enum class MainTab(val label: String, val icon: String) {
-    CATS("Kočičky", "🐾"),
+    PETS("Mazlíčci", "🐾"),
     STATUS("Stavy", "💖"),
     FOOD("Jídlo", "🥣"),
     MEDS("Léky", "💊"),
@@ -68,10 +68,15 @@ fun App() {
     }
     var isSyncing by remember { mutableStateOf(false) }
 
-    var activeTab by remember { mutableStateOf(MainTab.CATS) }
+    var activeTab by remember { mutableStateOf(MainTab.PETS) }
     var selectedCatIdFilter by remember { mutableStateOf<String?>(null) }
 
-    // Dialogy pro přidávání, úpravu a mazání
+    // Dialogy pro přidávání, úpravu, mazání a úvodní volbu zvířátka
+    var showSpeciesWelcomeDialog by remember {
+        mutableStateOf(appState.preferredSpeciesMode == "UNSET")
+    }
+    var defaultSpeciesForNewPet by remember { mutableStateOf("CAT") }
+
     var editingCat by remember { mutableStateOf<CatProfile?>(null) }
     var deletingCat by remember { mutableStateOf<CatProfile?>(null) }
     var showAddCatDialog by remember { mutableStateOf(false) }
@@ -206,15 +211,25 @@ fun App() {
         scheduleAllActiveNotifications(appState)
     }
 
+    // Filtrování mazlíčků podle zvoleného režimu (CAT / DOG / ALL)
+    val modeFilteredPets = remember(appState.cats, appState.preferredSpeciesMode) {
+        when (appState.preferredSpeciesMode) {
+            "CAT" -> appState.cats.filter { it.species == "CAT" }
+            "DOG" -> appState.cats.filter { it.species == "DOG" }
+            else -> appState.cats
+        }
+    }
+    val visiblePets = if (modeFilteredPets.isEmpty()) appState.cats else modeFilteredPets
+
     val unreadNotifCount = appState.notifications.count { !it.isRead }
     val todayStr = PlatformManager.currentDateString()
     val pendingFoodsToday = appState.foods.count { it.lastFedDate != todayStr }
     val pendingMedsToday = appState.medications.count { it.lastGivenDate != todayStr }
     val pendingVetCount = appState.vetVisits.count { !it.isCompleted }
-    val catsSubtitle = if (appState.cats.isEmpty()) {
-        "Zatím žádná kočička – přidej první 🐾"
+    val petsSubtitle = if (appState.cats.isEmpty()) {
+        "Zatím žádný mazlíček – přidej prvního 🐾"
     } else {
-        appState.cats.joinToString(" & ") { it.name }
+        appState.cats.joinToString(" & ") { "${if (it.species == "DOG") "🐶" else "🐱"} ${it.name}" }
     }
 
     MaterialTheme(
@@ -240,9 +255,11 @@ fun App() {
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
             TopHeaderBar(
-                catsSubtitle = catsSubtitle,
+                petsSubtitle = petsSubtitle,
+                speciesMode = appState.preferredSpeciesMode,
                 pendingFoodsToday = pendingFoodsToday,
-                pendingMedsToday = pendingMedsToday
+                pendingMedsToday = pendingMedsToday,
+                onOpenSpeciesSwitch = { showSpeciesWelcomeDialog = true }
             )
 
             if (bannerMessage != null) {
@@ -278,10 +295,13 @@ fun App() {
             }
 
             CatQuickSelectorRow(
-                cats = appState.cats,
+                cats = visiblePets,
                 selectedCatId = selectedCatIdFilter,
                 onSelectCat = { selectedCatIdFilter = it },
-                onAddCatClick = { showAddCatDialog = true }
+                onAddCatClick = {
+                    defaultSpeciesForNewPet = if (appState.preferredSpeciesMode == "DOG") "DOG" else "CAT"
+                    showAddCatDialog = true
+                }
             )
 
             Box(
@@ -290,8 +310,8 @@ fun App() {
                     .fillMaxWidth()
             ) {
                 when (activeTab) {
-                    MainTab.CATS -> CatsTabScreen(
-                        cats = appState.cats.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
+                    MainTab.PETS -> CatsTabScreen(
+                        cats = visiblePets.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
                         foods = appState.foods,
                         medications = appState.medications,
                         vetVisits = appState.vetVisits,
@@ -301,7 +321,14 @@ fun App() {
                         syncStatusText = syncStatusText,
                         onEditCat = { editingCat = it },
                         onRequestDeleteCat = { deletingCat = it },
-                        onAddCat = { showAddCatDialog = true },
+                        onAddCat = {
+                            defaultSpeciesForNewPet = "CAT"
+                            showAddCatDialog = true
+                        },
+                        onAddDog = {
+                            defaultSpeciesForNewPet = "DOG"
+                            showAddCatDialog = true
+                        },
                         onOpenVetSection = { activeTab = MainTab.STATUS },
                         onOpenCloudSettings = { showCloudDialog = true },
                         onRefreshCloud = {
@@ -314,7 +341,7 @@ fun App() {
                     )
 
                     MainTab.STATUS -> StatusAndLogsTabScreen(
-                        cats = appState.cats.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
+                        cats = visiblePets.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
                         vetVisits = appState.vetVisits.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
                         logs = appState.healthLogs.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
                         onQuickUpdateCat = { updatedCat, logText ->
@@ -333,7 +360,7 @@ fun App() {
                                     cats = newCats,
                                     healthLogs = listOf(newLog) + appState.healthLogs
                                 ),
-                                "Stav kočičky ${updatedCat.name} byl uložen!"
+                                "Stav pro ${updatedCat.name} byl uložen!"
                             )
                         },
                         onAddVetVisitClick = {
@@ -371,7 +398,7 @@ fun App() {
                                     healthLogs = listOf(newLog) + appState.healthLogs,
                                     notifications = listOf(newNotif) + appState.notifications
                                 ),
-                                "Návštěva lékaře pro ${visit.catName} byla splněna a zapsána do deníčku!"
+                                "Návštěva lékaře pro ${visit.catName} byla splněna!"
                             )
                         },
                         onToggleVetNotification = { visit ->
@@ -581,13 +608,13 @@ fun App() {
                         notifications = appState.notifications,
                         onTestSystemNotification = {
                             PlatformManager.sendImmediateTestNotification(
-                                title = "🐾 Moje kočičky ($catsSubtitle)",
+                                title = "🐾 Moji mazlíčci ($petsSubtitle)",
                                 message = "Připomínka: Nezapomeň zkontrolovat misky, vodu, léky a termíny očkování! 💕"
                             )
                             val testItem = AppNotificationItem(
                                 id = "notif_${PlatformManager.currentTimeMillis()}",
                                 title = "🔔 Testovací upozornění odesláno",
-                                message = "Systémová notifikace Moje kočičky byla odeslána do horní lišty telefonu.",
+                                message = "Systémová notifikace Moji mazlíčci byla odeslána do horní lišty telefonu.",
                                 timeText = "Právě teď",
                                 isRead = false
                             )
@@ -611,6 +638,38 @@ fun App() {
                 pendingMedsCount = pendingMedsToday,
                 unreadNotifCount = unreadNotifCount,
                 onSelectTab = { activeTab = it }
+            )
+        }
+
+        // Úvodní dialog pro výběr zvířátka (Kočka / Pes / Obojí)
+        if (showSpeciesWelcomeDialog) {
+            SpeciesWelcomeDialog(
+                currentMode = appState.preferredSpeciesMode,
+                onSelectMode = { chosenMode ->
+                    showSpeciesWelcomeDialog = false
+                    selectedCatIdFilter = null
+                    val hasDog = appState.cats.any { it.species == "DOG" }
+                    if (chosenMode == "DOG" && !hasDog) {
+                        persistAndSync(appState.copy(preferredSpeciesMode = chosenMode))
+                        defaultSpeciesForNewPet = "DOG"
+                        showAddCatDialog = true
+                    } else {
+                        persistAndSync(
+                            appState.copy(preferredSpeciesMode = chosenMode),
+                            when (chosenMode) {
+                                "CAT" -> "Zvolen režim: Kočičky 🐱"
+                                "DOG" -> "Zvolen režim: Pejsci 🐶"
+                                else -> "Zvolen režim: Kočičky i pejsci 🐾"
+                            }
+                        )
+                    }
+                },
+                onAddPetDirectly = { species ->
+                    showSpeciesWelcomeDialog = false
+                    persistAndSync(appState.copy(preferredSpeciesMode = "ALL"))
+                    defaultSpeciesForNewPet = species
+                    showAddCatDialog = true
+                }
             )
         }
 
@@ -641,7 +700,7 @@ fun App() {
                             medications = updatedMeds,
                             vetVisits = updatedVets
                         ),
-                        "Profil kočičky ${updated.name} byl uložen!"
+                        "Profil mazlíčka ${updated.name} (${updated.breed}) byl uložen!"
                     )
                 }
             )
@@ -673,7 +732,7 @@ fun App() {
                             vetVisits = appState.vetVisits.filterNot { it.catId == catToRemove.id },
                             healthLogs = appState.healthLogs.filterNot { it.catId == catToRemove.id }
                         ),
-                        "Kočička ${catToRemove.name} byla smazána."
+                        "Mazlíček ${catToRemove.name} byl smazán."
                     )
                 }
             )
@@ -681,12 +740,17 @@ fun App() {
 
         if (showAddCatDialog) {
             AddCatDialog(
+                initialSpecies = defaultSpeciesForNewPet,
                 onDismiss = { showAddCatDialog = false },
-                onAdd = { newCat ->
+                onAdd = { newPet ->
                     showAddCatDialog = false
+                    val nextMode = if (appState.preferredSpeciesMode == "UNSET") "ALL" else appState.preferredSpeciesMode
                     persistAndSync(
-                        appState.copy(cats = appState.cats + newCat),
-                        "Přidána nová kočička ${newCat.name}!"
+                        appState.copy(
+                            cats = appState.cats + newPet,
+                            preferredSpeciesMode = nextMode
+                        ),
+                        "Přidán nový mazlíček ${newPet.name} (${newPet.breed})!"
                     )
                 }
             )
@@ -873,11 +937,153 @@ fun App() {
 }
 
 @Composable
-private fun TopHeaderBar(
-    catsSubtitle: String,
-    pendingFoodsToday: Int,
-    pendingMedsToday: Int
+private fun SpeciesWelcomeDialog(
+    currentMode: String,
+    onSelectMode: (String) -> Unit,
+    onAddPetDirectly: (String) -> Unit
 ) {
+    Dialog(onDismissRequest = {
+        val fallback = if (currentMode == "UNSET") "ALL" else currentMode
+        onSelectMode(fallback)
+    }) {
+        Card(
+            backgroundColor = BgBeigeLight,
+            shape = RoundedCornerShape(22.dp),
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, BabyPinkAccent, RoundedCornerShape(22.dp))
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "🐾 Vítej v Moji mazlíčci!",
+                    color = CocoaBrown,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Vyber si, o jaké zvířátko se staráš. Věk se pak automaticky počítá přímo podle rasy kočičky nebo pejska.",
+                    color = CocoaMuted,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Button(
+                    onClick = { onSelectMode("CAT") },
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = BabyPinkAccent,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "🐱 Mám kočičku / kočičky",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = { onSelectMode("DOG") },
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = BabyPinkDeep,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "🐶 Mám pejska / pejsky",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = { onSelectMode("ALL") },
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "🐾 Mám kočičky i pejsky (zobrazit vše)",
+                        color = CocoaBrown,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Divider(color = SoftBorder)
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { onAddPetDirectly("CAT") },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "+ Nová kočka 🐱",
+                            color = BabyPinkDeep,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { onAddPetDirectly("DOG") },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "+ Nový pes 🐶",
+                            color = BabyPinkDeep,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopHeaderBar(
+    petsSubtitle: String,
+    speciesMode: String,
+    pendingFoodsToday: Int,
+    pendingMedsToday: Int,
+    onOpenSpeciesSwitch: () -> Unit
+) {
+    val modeIcon = when (speciesMode) {
+        "CAT" -> "🐱"
+        "DOG" -> "🐶"
+        else -> "🐾"
+    }
+
     Surface(
         color = BabyPinkCard,
         elevation = 3.dp,
@@ -892,26 +1098,50 @@ private fun TopHeaderBar(
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(38.dp)
                     .clip(CircleShape)
                     .background(BabyPinkSoft)
-                    .border(1.5.dp, BabyPinkAccent, CircleShape),
+                    .border(1.5.dp, BabyPinkAccent, CircleShape)
+                    .clickable { onOpenSpeciesSwitch() },
                 contentAlignment = Alignment.Center
             ) {
-                Text("🐱", fontSize = 18.sp)
+                Text(modeIcon, fontSize = 18.sp)
             }
             Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onOpenSpeciesSwitch() }
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Moji mazlíčci",
+                        color = CocoaBrown,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(BgBeigeLight)
+                            .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "🐱/🐶 Volba",
+                            color = BabyPinkDeep,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
                 Text(
-                    text = "Moje kočičky",
-                    color = CocoaBrown,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = catsSubtitle,
+                    text = petsSubtitle,
                     color = CocoaMuted,
                     fontSize = 11.sp,
                     maxLines = 1,
@@ -974,7 +1204,7 @@ private fun CatQuickSelectorRow(
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
-                    text = "🐾 Všechny (${cats.size})",
+                    text = "🐾 Všichni (${cats.size})",
                     color = if (isAll) Color.White else CocoaBrown,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
@@ -985,6 +1215,12 @@ private fun CatQuickSelectorRow(
 
         items(cats) { cat ->
             val isSelected = selectedCatId == cat.id
+            val icon = when {
+                cat.species == "DOG" -> "🐶"
+                cat.breedType == "RAGDOLL" -> "💎"
+                cat.breedType == "MAINE_COON" -> "🦁"
+                else -> "🐱"
+            }
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(18.dp))
@@ -994,7 +1230,7 @@ private fun CatQuickSelectorRow(
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
-                    text = "${if (cat.breedType == "RAGDOLL") "💎" else if (cat.breedType == "MAINE_COON") "🦁" else "🐱"} ${cat.name}",
+                    text = "$icon ${cat.name}",
                     color = if (isSelected) Color.White else CocoaBrown,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
@@ -1013,7 +1249,7 @@ private fun CatQuickSelectorRow(
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
-                    text = "+ Další kočička",
+                    text = "+ Přidat mazlíčka",
                     color = BabyPinkDeep,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
@@ -1037,6 +1273,7 @@ private fun CatsTabScreen(
     onEditCat: (CatProfile) -> Unit,
     onRequestDeleteCat: (CatProfile) -> Unit,
     onAddCat: () -> Unit,
+    onAddDog: () -> Unit,
     onOpenVetSection: () -> Unit,
     onOpenCloudSettings: () -> Unit,
     onRefreshCloud: () -> Unit
@@ -1054,9 +1291,12 @@ private fun CatsTabScreen(
             val nextVetForCat = vetVisits.firstOrNull { it.catId == cat.id && !it.isCompleted }
             val computedAgeText = CatAgeCalculator.formatFullAgeSummary(
                 birthDate = cat.birthDate,
+                species = cat.species,
+                breedSize = cat.breedSize,
                 fallbackAgeText = cat.ageText,
                 todayDate = todayStr
             )
+            val speciesBadge = if (cat.species == "DOG") "🐶 Pes" else "🐱 Kočka"
 
             Card(
                 backgroundColor = BgBeigeLight,
@@ -1091,10 +1331,10 @@ private fun CatsTabScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(BabyPinkSoft)
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        .padding(horizontal = 7.dp, vertical = 2.dp)
                                 ) {
                                     Text(
-                                        text = cat.breed,
+                                        text = speciesBadge,
                                         color = CocoaBrown,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
@@ -1103,12 +1343,18 @@ private fun CatsTabScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = "🎂 Narození: ${cat.birthDate}  •  Váha: ${cat.weightKg} kg",
+                                text = "🏷️ Rasa: ${cat.breed}" + if (cat.species == "DOG") " (${PetBreedCatalog.sizeLabelCz(cat.breedSize)})" else "",
                                 color = CocoaBrown,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "🎂 Narození: ${cat.birthDate}  •  Váha: ${cat.weightKg} kg",
+                                color = CocoaMuted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = "⏳ Věk: $computedAgeText",
@@ -1147,7 +1393,7 @@ private fun CatsTabScreen(
                             modifier = Modifier.weight(1f)
                         )
                         StatusMiniBadge(
-                            title = "Kožíšek",
+                            title = "Srst a péče",
                             value = cat.furStatus,
                             modifier = Modifier.weight(1f)
                         )
@@ -1337,23 +1583,43 @@ private fun CatsTabScreen(
         }
 
         item {
-            OutlinedButton(
-                onClick = onAddCat,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "🐾 Přidat další kočičku do rodiny",
-                    color = BabyPinkDeep,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center
-                )
+                OutlinedButton(
+                    onClick = onAddCat,
+                    shape = RoundedCornerShape(16.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "🐱 + Přidat kočičku",
+                        color = BabyPinkDeep,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onAddDog,
+                    shape = RoundedCornerShape(16.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "🐶 + Přidat pejska",
+                        color = BabyPinkDeep,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
-        // Karta pro synchronizaci a zálohu přímo v záložce Kočičky
+        // Karta pro synchronizaci a zálohu přímo v záložce Mazlíčci
         item {
             Card(
                 backgroundColor = BabyPinkCard,
@@ -1383,7 +1649,7 @@ private fun CatsTabScreen(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Při výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, fotky, jídlo, léky, pojištění i veterina se ihned obnoví.",
+                        text = "Při výměně telefonu stačí zadat váš Rodinný účet a PIN a všichni mazlíčci, fotky, jídlo, léky, pojištění i veterina se ihned obnoví.",
                         color = CocoaMuted,
                         fontSize = 11.sp
                     )
@@ -1475,8 +1741,8 @@ private fun StatusAndLogsTabScreen(
     onAddHealthLog: () -> Unit,
     onDeleteLog: (String) -> Unit
 ) {
-    val moodOptions = listOf("Mazlivá 💕", "Hravá 🐾", "Ospalá 😴", "Klidná 🌸", "Zvídavá 🦋")
-    val appetiteOptions = listOf("Výborná 🐟", "Velký jedlík 🥩", "Mlsná 🥣", "Menší chuť 🐾")
+    val moodOptions = listOf("Mazlivá 💕", "Hravá 🐾", "Veselá 🎾", "Ospalá 😴", "Klidná 🌸")
+    val appetiteOptions = listOf("Výborná 🍖", "Velký jedlík 🥩", "Mlsná 🥣", "Menší chuť 🐾")
     val waterOptions = listOf("Pije pravidelně 💧", "Miluje fontánku ⛲", "Méně pije 🥛")
 
     LazyColumn(
@@ -1912,13 +2178,13 @@ private fun FoodTabScreen(
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "🥣 Jídelníček a krmení kočiček",
+                    text = "🥣 Jídelníček a krmení mazlíčků",
                     color = CocoaBrown,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Text(
-                    text = "Sleduj kapsičky, granulky, zásoby a časy krmení",
+                    text = "Sleduj kapsičky, granulky, konzervy, zásoby a časy krmení",
                     color = CocoaMuted,
                     fontSize = 11.sp
                 )
@@ -1934,7 +2200,7 @@ private fun FoodTabScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "➕ Přidat jídlo nebo kapsičku",
+                        text = "➕ Přidat jídlo, granule nebo kapsičku",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
@@ -2686,8 +2952,11 @@ private fun EditCatDialog(
     onRequestDelete: (CatProfile) -> Unit,
     onSave: (CatProfile) -> Unit
 ) {
+    var species by remember { mutableStateOf(cat.species) }
     var name by remember { mutableStateOf(cat.name) }
+    var breed by remember { mutableStateOf(cat.breed) }
     var selectedBreedType by remember { mutableStateOf(cat.breedType) }
+    var breedSize by remember { mutableStateOf(cat.breedSize) }
     var photoBase64 by remember { mutableStateOf(cat.photoBase64) }
     var birthDate by remember { mutableStateOf(cat.birthDate) }
     var weightKg by remember { mutableStateOf(cat.weightKg) }
@@ -2697,19 +2966,23 @@ private fun EditCatDialog(
     var insuranceTo by remember { mutableStateOf(cat.insuranceTo) }
     var energy by remember { mutableStateOf(cat.energyLevel.toFloat()) }
     var notes by remember { mutableStateOf(cat.notes) }
+    var validationError by remember { mutableStateOf<String?>(null) }
 
-    val breedLabel = when (selectedBreedType) {
-        "RAGDOLL" -> "Ragdollka"
-        "MAINE_COON" -> "Mainská mývalí"
-        else -> "Kočička"
-    }
     val previewCat = cat.copy(
         name = name.ifBlank { cat.name },
-        breed = breedLabel,
+        breed = breed.ifBlank { cat.breed },
         breedType = selectedBreedType,
-        photoBase64 = photoBase64
+        photoBase64 = photoBase64,
+        species = species,
+        breedSize = breedSize
     )
-    val liveAgePreview = CatAgeCalculator.formatFullAgeSummary(birthDate, cat.ageText)
+    val liveAgePreview = CatAgeCalculator.formatFullAgeSummary(
+        birthDate = birthDate,
+        species = species,
+        breedSize = breedSize,
+        fallbackAgeText = cat.ageText
+    )
+    val presets = if (species == "DOG") PetBreedCatalog.dogPresets else PetBreedCatalog.catPresets
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -2755,7 +3028,39 @@ private fun EditCatDialog(
                 }
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Sekce s živým náhledem avatara a volbou Vlastní fotka vs. Ilustrace plemene
+                // Přepínač druhu: Kočka / Pes
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("CAT" to "🐱 Kočička", "DOG" to "🐶 Pejsek").forEach { (spKey, spLabel) ->
+                        val sel = species == spKey
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (sel) BabyPinkAccent else BabyPinkCard)
+                                .border(1.dp, if (sel) BabyPinkDeep else SoftBorder, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    species = spKey
+                                    selectedBreedType = if (spKey == "DOG") "DOG_MEDIUM" else "RAGDOLL"
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = spLabel,
+                                color = if (sel) Color.White else CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Živý náhled avatara a přepnutí Vlastní fotka vs. Ilustrace
                 Card(
                     backgroundColor = BabyPinkCard,
                     shape = RoundedCornerShape(14.dp),
@@ -2772,350 +3077,7 @@ private fun EditCatDialog(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (photoBase64.isNotBlank()) "Zobrazena: Vlastní fotka 📷" else "Zobrazena: Ilustrace plemene 🎨",
-                                color = CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Button(
-                                    onClick = {
-                                        PlatformManager.pickPhotoFromGallery { picked ->
-                                            if (!picked.isNullOrBlank()) {
-                                                photoBase64 = picked
-                                            }
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        backgroundColor = BabyPinkAccent,
-                                        contentColor = Color.White
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = "📷 Fotka",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1
-                                    )
-                                }
-
-                                OutlinedButton(
-                                    onClick = { photoBase64 = "" },
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = "🎨 Ilustrace",
-                                        fontSize = 11.sp,
-                                        color = CocoaBrown,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Plemeno:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(
-                        "RAGDOLL" to "Ragdollka",
-                        "MAINE_COON" to "Mainská mývalí",
-                        "OTHER" to "Jiná kočička"
-                    ).forEach { (typeKey, label) ->
-                        val sel = selectedBreedType == typeKey
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (sel) BabyPinkAccent else BabyPinkCard)
-                                .clickable { selectedBreedType = typeKey }
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (sel) Color.White else CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Jméno kočičky") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = birthDate,
-                        onValueChange = { birthDate = it },
-                        label = { Text("Narození (DD. M. RRRR)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1.3f)
-                    )
-                    OutlinedTextField(
-                        value = weightKg,
-                        onValueChange = { weightKg = it },
-                        label = { Text("Váha (kg)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(0.7f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "⏳ Vypočtený věk: $liveAgePreview",
-                    color = BabyPinkDeep,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "🛡️ Pojištění kočičky (Od – Do):",
-                    color = CocoaBrown,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = insuranceName,
-                    onValueChange = { insuranceName = it },
-                    label = { Text("Pojišťovna / smlouva (např. PetExpert)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = insuranceFrom,
-                        onValueChange = { insuranceFrom = it },
-                        label = { Text("Platnost Od") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = insuranceTo,
-                        onValueChange = { insuranceTo = it },
-                        label = { Text("Platnost Do") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = furStatus,
-                    onValueChange = { furStatus = it },
-                    label = { Text("Stav kožíšku") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "Vitalita a spokojenost: ${energy.toInt()} %",
-                    color = CocoaBrown,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Slider(
-                    value = energy,
-                    onValueChange = { energy = it },
-                    valueRange = 10f..100f
-                )
-
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Poznámka") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Zrušit", color = CocoaMuted)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: cat.ageText
-                            onSave(
-                                cat.copy(
-                                    name = name.ifBlank { cat.name },
-                                    breed = breedLabel,
-                                    breedType = selectedBreedType,
-                                    photoBase64 = photoBase64,
-                                    birthDate = birthDate.ifBlank { cat.birthDate },
-                                    ageText = computedActual,
-                                    weightKg = weightKg.ifBlank { "4.0" },
-                                    furStatus = furStatus.ifBlank { "Hebká ✨" },
-                                    insuranceName = insuranceName.trim(),
-                                    insuranceFrom = insuranceFrom.trim(),
-                                    insuranceTo = insuranceTo.trim(),
-                                    energyLevel = energy.toInt(),
-                                    notes = notes,
-                                    lastCheckedDate = PlatformManager.currentDateString()
-                                )
-                            )
-                        },
-                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
-                    ) {
-                        Text("Uložit", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DeleteCatConfirmDialog(
-    cat: CatProfile,
-    onDismiss: () -> Unit,
-    onConfirmDelete: (CatProfile) -> Unit
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            backgroundColor = BgBeigeLight,
-            shape = RoundedCornerShape(20.dp),
-            elevation = 8.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(2.dp, BabyPinkDeep, RoundedCornerShape(20.dp))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "🗑️ Smazat kočičku ${cat.name}?",
-                    color = CocoaBrown,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Opravdu chceš smazat kočičku ${cat.name} (${cat.breed})? Spolu s ní se odstraní i její položky krmení, léků a veteriny.",
-                    color = CocoaMuted,
-                    fontSize = 12.sp
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Zrušit", color = CocoaMuted, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { onConfirmDelete(cat) },
-                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkDeep)
-                    ) {
-                        Text("🗑️ Ano, smazat", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AddCatDialog(
-    onDismiss: () -> Unit,
-    onAdd: (CatProfile) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var selectedBreedType by remember { mutableStateOf("RAGDOLL") }
-    var photoBase64 by remember { mutableStateOf("") }
-    var birthDate by remember { mutableStateOf("1. 5. 2025") }
-    var weightKg by remember { mutableStateOf("3.8") }
-    var insuranceName by remember { mutableStateOf("PetExpert") }
-    var insuranceFrom by remember { mutableStateOf("1. 1. 2026") }
-    var insuranceTo by remember { mutableStateOf("31. 12. 2026") }
-    var notes by remember { mutableStateOf("Milá a hravá kočička 💕") }
-
-    val breedLabel = when (selectedBreedType) {
-        "RAGDOLL" -> "Ragdollka"
-        "MAINE_COON" -> "Mainská mývalí"
-        else -> "Kočička"
-    }
-    val previewCat = CatProfile(
-        id = "preview",
-        name = name.ifBlank { "Micka" },
-        breed = breedLabel,
-        breedType = selectedBreedType,
-        ageText = "1 rok",
-        weightKg = weightKg,
-        mood = "",
-        appetite = "",
-        waterIntake = "",
-        furStatus = "",
-        energyLevel = 95,
-        notes = "",
-        photoBase64 = photoBase64,
-        lastCheckedDate = ""
-    )
-    val liveAgePreview = CatAgeCalculator.formatFullAgeSummary(birthDate, "1 rok")
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            backgroundColor = BgBeigeLight,
-            shape = RoundedCornerShape(20.dp),
-            elevation = 8.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(
-                    text = "🐾 Přidat novou kočičku",
-                    color = CocoaBrown,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Card(
-                    backgroundColor = BabyPinkCard,
-                    shape = RoundedCornerShape(14.dp),
-                    elevation = 0.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, SoftBorder, RoundedCornerShape(14.dp))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CatAvatar(cat = previewCat, size = 64.dp)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (photoBase64.isNotBlank()) "Zobrazena: Vlastní fotka 📷" else "Zobrazena: Ilustrace plemene 🎨",
+                                text = if (photoBase64.isNotBlank()) "Zobrazena: Vlastní fotka 📷" else "Zobrazena: Ilustrace rasy 🎨",
                                 color = CocoaBrown,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -3161,36 +3123,562 @@ private fun AddCatDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Jméno kočičky") },
+                    label = { Text("Jméno mazlíčka") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(modifier = Modifier.height(8.dp))
 
-                Text("Plemeno:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Rasa / Plemeno (povinné * – ovlivňuje výpočet věku):",
+                    color = CocoaBrown,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(
-                        "RAGDOLL" to "Ragdollka",
-                        "MAINE_COON" to "Mainská mývalí",
-                        "OTHER" to "Jiná kočička"
-                    ).forEach { (typeKey, label) ->
-                        val sel = selectedBreedType == typeKey
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(presets) { preset ->
+                        val sel = breed.equals(preset.label, ignoreCase = true)
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (sel) BabyPinkAccent else BabyPinkCard)
-                                .clickable { selectedBreedType = typeKey }
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .border(1.dp, SoftBorder, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    breed = preset.label
+                                    selectedBreedType = preset.breedType
+                                    breedSize = preset.breedSize
+                                    validationError = null
+                                }
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = label,
+                                text = preset.label,
                                 color = if (sel) Color.White else CocoaBrown,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = breed,
+                    onValueChange = {
+                        breed = it
+                        validationError = null
+                    },
+                    label = { Text("Rasa / Plemeno * (povinné pole)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (species == "DOG") {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Velikost psí rasy (pro přesný přepočet psích let):",
+                        color = CocoaBrown,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(
+                            "SMALL" to "Malá <10kg",
+                            "MEDIUM" to "Střední",
+                            "LARGE" to "Velká",
+                            "GIANT" to "Obří >45kg"
+                        ).forEach { (szKey, szLabel) ->
+                            val sel = breedSize == szKey
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (sel) BabyPinkAccent else BgBeigeWarm)
+                                    .clickable {
+                                        breedSize = szKey
+                                        selectedBreedType = "DOG_$szKey"
+                                    }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = szLabel,
+                                    color = if (sel) Color.White else CocoaBrown,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (validationError != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = validationError!!,
+                        color = Color(0xFFD32F2F),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = birthDate,
+                        onValueChange = { birthDate = it },
+                        label = { Text("Narození (DD. M. RRRR)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.3f)
+                    )
+                    OutlinedTextField(
+                        value = weightKg,
+                        onValueChange = { weightKg = it },
+                        label = { Text("Váha (kg)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(0.7f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "⏳ Vypočtený věk: $liveAgePreview",
+                    color = BabyPinkDeep,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "🛡️ Pojištění mazlíčka (Od – Do):",
+                    color = CocoaBrown,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = insuranceName,
+                    onValueChange = { insuranceName = it },
+                    label = { Text("Pojišťovna / smlouva (např. PetExpert)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = insuranceFrom,
+                        onValueChange = { insuranceFrom = it },
+                        label = { Text("Platnost Od") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = insuranceTo,
+                        onValueChange = { insuranceTo = it },
+                        label = { Text("Platnost Do") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = furStatus,
+                    onValueChange = { furStatus = it },
+                    label = { Text("Stav srsti / péče") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Vitalita a spokojenost: ${energy.toInt()} %",
+                    color = CocoaBrown,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Slider(
+                    value = energy,
+                    onValueChange = { energy = it },
+                    valueRange = 10f..100f
+                )
+
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Poznámka") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Zrušit", color = CocoaMuted)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (breed.trim().isBlank()) {
+                                validationError = "⚠️ Vyplň prosím povinnou položku Rasa / Plemeno!"
+                            } else {
+                                val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: cat.ageText
+                                onSave(
+                                    cat.copy(
+                                        name = name.trim().ifBlank { cat.name },
+                                        breed = breed.trim(),
+                                        breedType = selectedBreedType,
+                                        photoBase64 = photoBase64,
+                                        birthDate = birthDate.ifBlank { cat.birthDate },
+                                        ageText = computedActual,
+                                        weightKg = weightKg.ifBlank { "4.0" },
+                                        furStatus = furStatus.ifBlank { "Hebká ✨" },
+                                        insuranceName = insuranceName.trim(),
+                                        insuranceFrom = insuranceFrom.trim(),
+                                        insuranceTo = insuranceTo.trim(),
+                                        energyLevel = energy.toInt(),
+                                        notes = notes,
+                                        lastCheckedDate = PlatformManager.currentDateString(),
+                                        species = species,
+                                        breedSize = breedSize
+                                    )
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
+                    ) {
+                        Text("Uložit", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeleteCatConfirmDialog(
+    cat: CatProfile,
+    onDismiss: () -> Unit,
+    onConfirmDelete: (CatProfile) -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            backgroundColor = BgBeigeLight,
+            shape = RoundedCornerShape(20.dp),
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, BabyPinkDeep, RoundedCornerShape(20.dp))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "🗑️ Smazat mazlíčka ${cat.name}?",
+                    color = CocoaBrown,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Opravdu chceš smazat mazlíčka ${cat.name} (${cat.breed})? Spolu s ním se odstraní i jeho položky krmení, léků a veteriny.",
+                    color = CocoaMuted,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Zrušit", color = CocoaMuted, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { onConfirmDelete(cat) },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkDeep)
+                    ) {
+                        Text("🗑️ Ano, smazat", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddCatDialog(
+    initialSpecies: String = "CAT",
+    onDismiss: () -> Unit,
+    onAdd: (CatProfile) -> Unit
+) {
+    var species by remember { mutableStateOf(initialSpecies) }
+    var name by remember { mutableStateOf("") }
+    var breed by remember { mutableStateOf("") }
+    var selectedBreedType by remember {
+        mutableStateOf(if (initialSpecies == "DOG") "DOG_MEDIUM" else "RAGDOLL")
+    }
+    var breedSize by remember { mutableStateOf("MEDIUM") }
+    var photoBase64 by remember { mutableStateOf("") }
+    var birthDate by remember { mutableStateOf("1. 5. 2025") }
+    var weightKg by remember { mutableStateOf(if (initialSpecies == "DOG") "12.0" else "3.8") }
+    var insuranceName by remember { mutableStateOf("PetExpert") }
+    var insuranceFrom by remember { mutableStateOf("1. 1. 2026") }
+    var insuranceTo by remember { mutableStateOf("31. 12. 2026") }
+    var notes by remember { mutableStateOf("Milý a hravý mazlíček 💕") }
+    var validationError by remember { mutableStateOf<String?>(null) }
+
+    val previewCat = CatProfile(
+        id = "preview",
+        name = name.ifBlank { if (species == "DOG") "Bady" else "Micka" },
+        breed = breed.ifBlank { if (species == "DOG") "Pejsek" else "Kočička" },
+        breedType = selectedBreedType,
+        ageText = "1 rok",
+        weightKg = weightKg,
+        mood = "",
+        appetite = "",
+        waterIntake = "",
+        furStatus = "",
+        energyLevel = 95,
+        notes = "",
+        photoBase64 = photoBase64,
+        lastCheckedDate = "",
+        species = species,
+        breedSize = breedSize
+    )
+    val liveAgePreview = CatAgeCalculator.formatFullAgeSummary(
+        birthDate = birthDate,
+        species = species,
+        breedSize = breedSize,
+        fallbackAgeText = "1 rok"
+    )
+    val presets = if (species == "DOG") PetBreedCatalog.dogPresets else PetBreedCatalog.catPresets
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            backgroundColor = BgBeigeLight,
+            shape = RoundedCornerShape(20.dp),
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "🐾 Přidat nového mazlíčka",
+                    color = CocoaBrown,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Volba Kočka vs. Pes
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("CAT" to "🐱 Kočička", "DOG" to "🐶 Pejsek").forEach { (spKey, spLabel) ->
+                        val sel = species == spKey
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (sel) BabyPinkAccent else BabyPinkCard)
+                                .border(1.dp, if (sel) BabyPinkDeep else SoftBorder, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    species = spKey
+                                    selectedBreedType = if (spKey == "DOG") "DOG_MEDIUM" else "RAGDOLL"
+                                    weightKg = if (spKey == "DOG") "12.0" else "3.8"
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = spLabel,
+                                color = if (sel) Color.White else CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    backgroundColor = BabyPinkCard,
+                    shape = RoundedCornerShape(14.dp),
+                    elevation = 0.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, SoftBorder, RoundedCornerShape(14.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CatAvatar(cat = previewCat, size = 64.dp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (photoBase64.isNotBlank()) "Zobrazena: Vlastní fotka 📷" else "Zobrazena: Ilustrace rasy 🎨",
+                                color = CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Button(
+                                    onClick = {
+                                        PlatformManager.pickPhotoFromGallery { picked ->
+                                            if (!picked.isNullOrBlank()) {
+                                                photoBase64 = picked
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        backgroundColor = BabyPinkAccent,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("📷 Fotka", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { photoBase64 = "" },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("🎨 Ilustrace", fontSize = 11.sp, color = CocoaBrown, fontWeight = FontWeight.Bold, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Jméno mazlíčka") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Vyber rasu nebo ji napiš (povinné *):",
+                    color = CocoaBrown,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(presets) { preset ->
+                        val sel = breed.equals(preset.label, ignoreCase = true)
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (sel) BabyPinkAccent else BabyPinkCard)
+                                .border(1.dp, SoftBorder, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    breed = preset.label
+                                    selectedBreedType = preset.breedType
+                                    breedSize = preset.breedSize
+                                    validationError = null
+                                }
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = preset.label,
+                                color = if (sel) Color.White else CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = breed,
+                    onValueChange = {
+                        breed = it
+                        validationError = null
+                    },
+                    label = { Text("Rasa / Plemeno * (povinné pole)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (species == "DOG") {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Velikost psí rasy (pro přesný přepočet psích let):",
+                        color = CocoaBrown,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(
+                            "SMALL" to "Malá <10kg",
+                            "MEDIUM" to "Střední",
+                            "LARGE" to "Velká",
+                            "GIANT" to "Obří >45kg"
+                        ).forEach { (szKey, szLabel) ->
+                            val sel = breedSize == szKey
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (sel) BabyPinkAccent else BgBeigeWarm)
+                                    .clickable {
+                                        breedSize = szKey
+                                        selectedBreedType = "DOG_$szKey"
+                                    }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = szLabel,
+                                    color = if (sel) Color.White else CocoaBrown,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (validationError != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = validationError!!,
+                        color = Color(0xFFD32F2F),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -3221,7 +3709,7 @@ private fun AddCatDialog(
 
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "🛡️ Pojištění kočičky (Od – Do):",
+                    text = "🛡️ Pojištění mazlíčka (Od – Do):",
                     color = CocoaBrown,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
@@ -3271,29 +3759,36 @@ private fun AddCatDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: "1 rok"
-                            onAdd(
-                                CatProfile(
-                                    id = "cat_${PlatformManager.currentTimeMillis()}",
-                                    name = name.ifBlank { "Micka" },
-                                    breed = breedLabel,
-                                    breedType = selectedBreedType,
-                                    ageText = computedActual,
-                                    weightKg = weightKg.ifBlank { "4.0" },
-                                    mood = "Mazlivá 💕",
-                                    appetite = "Výborná 🐟",
-                                    waterIntake = "Pije pravidelně 💧",
-                                    furStatus = "Hebká ✨",
-                                    energyLevel = 95,
-                                    notes = notes,
-                                    photoBase64 = photoBase64,
-                                    lastCheckedDate = PlatformManager.currentDateString(),
-                                    birthDate = birthDate.ifBlank { "1. 5. 2025" },
-                                    insuranceName = insuranceName.trim(),
-                                    insuranceFrom = insuranceFrom.trim(),
-                                    insuranceTo = insuranceTo.trim()
+                            if (breed.trim().isBlank()) {
+                                validationError = "⚠️ Vyplň prosím povinnou položku Rasa / Plemeno!"
+                            } else {
+                                val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: "1 rok"
+                                val defaultName = if (species == "DOG") "Bady" else "Micka"
+                                onAdd(
+                                    CatProfile(
+                                        id = "pet_${PlatformManager.currentTimeMillis()}",
+                                        name = name.trim().ifBlank { defaultName },
+                                        breed = breed.trim(),
+                                        breedType = selectedBreedType,
+                                        ageText = computedActual,
+                                        weightKg = weightKg.ifBlank { if (species == "DOG") "12.0" else "4.0" },
+                                        mood = if (species == "DOG") "Veselá 🎾" else "Mazlivá 💕",
+                                        appetite = "Výborná 🍖",
+                                        waterIntake = "Pije pravidelně 💧",
+                                        furStatus = "Hebká ✨",
+                                        energyLevel = 95,
+                                        notes = notes,
+                                        photoBase64 = photoBase64,
+                                        lastCheckedDate = PlatformManager.currentDateString(),
+                                        birthDate = birthDate.ifBlank { "1. 5. 2025" },
+                                        insuranceName = insuranceName.trim(),
+                                        insuranceFrom = insuranceFrom.trim(),
+                                        insuranceTo = insuranceTo.trim(),
+                                        species = species,
+                                        breedSize = breedSize
+                                    )
                                 )
-                            )
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
                     ) {
@@ -3341,10 +3836,10 @@ private fun AddOrEditVetVisitDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text("Pro kočičku:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Pro mazlíčka:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    cats.forEach { cat ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(cats) { cat ->
                         val sel = selectedCat?.id == cat.id
                         Box(
                             modifier = Modifier
@@ -3452,7 +3947,7 @@ private fun AddOrEditFoodDialog(
         )
     }
     var foodName by remember { mutableStateOf(initialFood?.name ?: "") }
-    var portion by remember { mutableStateOf(initialFood?.portion ?: "1 kapsička (85 g)") }
+    var portion by remember { mutableStateOf(initialFood?.portion ?: "1 porce / miska") }
     var timeOfDay by remember { mutableStateOf(initialFood?.timeOfDay ?: "07:30") }
     var frequency by remember { mutableStateOf(initialFood?.frequency ?: "Denně") }
     var portionsText by remember { mutableStateOf((initialFood?.remainingPortions ?: 20).toString()) }
@@ -3468,17 +3963,17 @@ private fun AddOrEditFoodDialog(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = if (isEdit) "✏️ Upravit krmení" else "🥣 Přidat jídlo nebo kapsičku",
+                    text = if (isEdit) "✏️ Upravit krmení" else "🥣 Přidat jídlo, granule nebo kapsičku",
                     color = CocoaBrown,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text("Pro kočičku:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Pro mazlíčka:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    cats.forEach { cat ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(cats) { cat ->
                         val sel = selectedCat?.id == cat.id
                         Box(
                             modifier = Modifier
@@ -3501,7 +3996,7 @@ private fun AddOrEditFoodDialog(
                 OutlinedTextField(
                     value = foodName,
                     onValueChange = { foodName = it },
-                    label = { Text("Název jídla / kapsičky / granulek") },
+                    label = { Text("Název jídla / granulí / kapsičky") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -3509,7 +4004,7 @@ private fun AddOrEditFoodDialog(
                 OutlinedTextField(
                     value = portion,
                     onValueChange = { portion = it },
-                    label = { Text("Velikost porce (např. 1 kapsička / 50 g)") },
+                    label = { Text("Velikost porce (např. 1 kapsička / 150 g)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -3525,7 +4020,7 @@ private fun AddOrEditFoodDialog(
                     OutlinedTextField(
                         value = portionsText,
                         onValueChange = { portionsText = it },
-                        label = { Text("Zásoba kusů") },
+                        label = { Text("Zásoba porcí") },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
@@ -3570,7 +4065,7 @@ private fun AddOrEditFoodDialog(
                                         id = initialFood?.id ?: "food_${PlatformManager.currentTimeMillis()}",
                                         catId = targetCat.id,
                                         catName = targetCat.name,
-                                        name = foodName.ifBlank { "Masová kapsička" },
+                                        name = foodName.ifBlank { "Krmení do misky" },
                                         portion = portion.ifBlank { "1 porce" },
                                         timeOfDay = timeOfDay.ifBlank { "07:30" },
                                         frequency = frequency,
@@ -3632,10 +4127,10 @@ private fun AddOrEditMedicationDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text("Pro kočičku:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Pro mazlíčka:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    cats.forEach { cat ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(cats) { cat ->
                         val sel = selectedCat?.id == cat.id
                         Box(
                             modifier = Modifier
@@ -3727,7 +4222,7 @@ private fun AddOrEditMedicationDialog(
                                         id = initialMed?.id ?: "med_${PlatformManager.currentTimeMillis()}",
                                         catId = targetCat.id,
                                         catName = targetCat.name,
-                                        name = medName.ifBlank { "Vitamínová pasta" },
+                                        name = medName.ifBlank { "Vitamín" },
                                         dosage = dosage.ifBlank { "1 dávka" },
                                         timeOfDay = timeOfDay.ifBlank { "08:00" },
                                         frequency = frequency,
@@ -3781,8 +4276,8 @@ private fun AddHealthLogDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    cats.forEach { cat ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(cats) { cat ->
                         val sel = selectedCat?.id == cat.id
                         Box(
                             modifier = Modifier
@@ -3826,7 +4321,7 @@ private fun AddHealthLogDialog(
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Nadpis (např. Očkování, Vážení, Česání)") },
+                    label = { Text("Nadpis (např. Očkování, Vážení, Procházka)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -3857,7 +4352,7 @@ private fun AddHealthLogDialog(
                                         catId = targetCat.id,
                                         catName = targetCat.name,
                                         dateText = PlatformManager.currentDateString(),
-                                        title = title.ifBlank { "Kontrola kočičky" },
+                                        title = title.ifBlank { "Kontrola mazlíčka" },
                                         detail = detail.ifBlank { "Vše v pořádku 💕" },
                                         category = category
                                     )
