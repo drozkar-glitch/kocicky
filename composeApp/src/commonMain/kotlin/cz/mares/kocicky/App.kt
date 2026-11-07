@@ -38,6 +38,7 @@ private val SoftBorder = Color(0xFFF2D0DC)
 private enum class MainTab(val label: String, val icon: String) {
     CATS("Kočičky", "🐾"),
     STATUS("Stavy", "💖"),
+    FOOD("Jídlo", "🥣"),
     MEDS("Léky", "💊"),
     ALERTS("Notifikace", "🔔")
 }
@@ -68,10 +69,16 @@ fun App() {
     var activeTab by remember { mutableStateOf(MainTab.CATS) }
     var selectedCatIdFilter by remember { mutableStateOf<String?>(null) }
 
-    // Dialogy
+    // Dialogy pro přidávání a úpravu
     var editingCat by remember { mutableStateOf<CatProfile?>(null) }
     var showAddCatDialog by remember { mutableStateOf(false) }
-    var showAddMedDialog by remember { mutableStateOf(false) }
+
+    var showFoodDialog by remember { mutableStateOf(false) }
+    var editingFood by remember { mutableStateOf<FoodItem?>(null) }
+
+    var showMedDialog by remember { mutableStateOf(false) }
+    var editingMed by remember { mutableStateOf<MedicationItem?>(null) }
+
     var showAddHealthLogDialog by remember { mutableStateOf(false) }
     var showCloudDialog by remember { mutableStateOf(false) }
     var bannerMessage by remember { mutableStateOf<String?>(null) }
@@ -102,6 +109,31 @@ fun App() {
         }
     }
 
+    fun scheduleAllActiveNotifications(state: CatAppState) {
+        state.medications.forEach { med ->
+            if (med.notificationsEnabled) {
+                PlatformManager.scheduleMedicationNotification(
+                    id = med.id,
+                    catName = med.catName,
+                    medName = med.name,
+                    dosage = med.dosage,
+                    timeHhMm = med.timeOfDay
+                )
+            }
+        }
+        state.foods.forEach { food ->
+            if (food.notificationsEnabled) {
+                PlatformManager.scheduleMedicationNotification(
+                    id = food.id,
+                    catName = food.catName,
+                    medName = "🥣 Krmení: ${food.name}",
+                    dosage = food.portion,
+                    timeHhMm = food.timeOfDay
+                )
+            }
+        }
+    }
+
     fun pullFromServer(
         targetCode: String = familyCode,
         targetPin: String = familyPin,
@@ -122,6 +154,7 @@ fun App() {
                     if (manualLogin || remoteState.updatedAt >= appState.updatedAt) {
                         appState = remoteState
                         PlatformManager.saveLocalData(CatDataSerializer.serialize(remoteState))
+                        scheduleAllActiveNotifications(remoteState)
                         syncStatusText = "☁️ Synchronizováno ($targetCode)"
                         if (manualLogin) {
                             bannerMessage = "Data pro účet '$targetCode' byla úspěšně načtena ze serveru!"
@@ -153,21 +186,12 @@ fun App() {
         if (familyCode.isNotBlank() && familyPin.isNotBlank()) {
             pullFromServer(familyCode, familyPin, manualLogin = false)
         }
-        appState.medications.forEach { med ->
-            if (med.notificationsEnabled) {
-                PlatformManager.scheduleMedicationNotification(
-                    id = med.id,
-                    catName = med.catName,
-                    medName = med.name,
-                    dosage = med.dosage,
-                    timeHhMm = med.timeOfDay
-                )
-            }
-        }
+        scheduleAllActiveNotifications(appState)
     }
 
     val unreadNotifCount = appState.notifications.count { !it.isRead }
     val todayStr = PlatformManager.currentDateString()
+    val pendingFoodsToday = appState.foods.count { it.lastFedDate != todayStr }
     val pendingMedsToday = appState.medications.count { it.lastGivenDate != todayStr }
 
     MaterialTheme(
@@ -194,6 +218,7 @@ fun App() {
         ) {
             TopHeaderBar(
                 syncStatusText = syncStatusText,
+                pendingFoodsToday = pendingFoodsToday,
                 pendingMedsToday = pendingMedsToday,
                 onCloudClick = { showCloudDialog = true },
                 onRefreshClick = {
@@ -252,6 +277,7 @@ fun App() {
                 when (activeTab) {
                     MainTab.CATS -> CatsTabScreen(
                         cats = appState.cats.filter { selectedCatIdFilter == null || it.id == selectedCatIdFilter },
+                        foods = appState.foods,
                         medications = appState.medications,
                         todayStr = todayStr,
                         onPickRealPhoto = { cat ->
@@ -322,6 +348,88 @@ fun App() {
                         }
                     )
 
+                    MainTab.FOOD -> FoodTabScreen(
+                        foods = appState.foods.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
+                        todayStr = todayStr,
+                        onMarkFedToday = { food ->
+                            val newRemaining = (food.remainingPortions - 1).coerceAtLeast(0)
+                            val updatedFoods = appState.foods.map {
+                                if (it.id == food.id) {
+                                    it.copy(lastFedDate = todayStr, remainingPortions = newRemaining)
+                                } else it
+                            }
+                            val newLog = HealthLogItem(
+                                id = "log_${PlatformManager.currentTimeMillis()}",
+                                catId = food.catId,
+                                catName = food.catName,
+                                dateText = todayStr,
+                                title = "Nakrmeno: ${food.name} 🥣",
+                                detail = "Porce: ${food.portion} (zbývá $newRemaining porcí).",
+                                category = "Jídlo"
+                            )
+                            val newNotif = AppNotificationItem(
+                                id = "notif_${PlatformManager.currentTimeMillis()}",
+                                title = "🥣 Nakrmeno: ${food.name} (${food.catName})",
+                                message = "Porce (${food.portion}) byla dána do mističky.",
+                                timeText = food.timeOfDay,
+                                isRead = false
+                            )
+                            persistAndSync(
+                                appState.copy(
+                                    foods = updatedFoods,
+                                    healthLogs = listOf(newLog) + appState.healthLogs,
+                                    notifications = listOf(newNotif) + appState.notifications
+                                ),
+                                "Mňam! Krmení pro ${food.catName} je na dnešek odškrtnuté."
+                            )
+                        },
+                        onToggleNotification = { food ->
+                            val nextEnabled = !food.notificationsEnabled
+                            if (nextEnabled) {
+                                PlatformManager.scheduleMedicationNotification(
+                                    id = food.id,
+                                    catName = food.catName,
+                                    medName = "🥣 Krmení: ${food.name}",
+                                    dosage = food.portion,
+                                    timeHhMm = food.timeOfDay
+                                )
+                            } else {
+                                PlatformManager.cancelMedicationNotification(food.id)
+                            }
+                            val updatedFoods = appState.foods.map {
+                                if (it.id == food.id) it.copy(notificationsEnabled = nextEnabled) else it
+                            }
+                            persistAndSync(
+                                appState.copy(foods = updatedFoods),
+                                if (nextEnabled) "Upozornění na krmení v ${food.timeOfDay} zapnuto 🔔" else "Upozornění vypnuto 🔕"
+                            )
+                        },
+                        onRefillPortions = { food ->
+                            val updatedFoods = appState.foods.map {
+                                if (it.id == food.id) it.copy(remainingPortions = it.remainingPortions + 12) else it
+                            }
+                            persistAndSync(
+                                appState.copy(foods = updatedFoods),
+                                "Doplněno +12 porcí pro ${food.name}."
+                            )
+                        },
+                        onEditFood = { food ->
+                            editingFood = food
+                            showFoodDialog = true
+                        },
+                        onDeleteFood = { food ->
+                            PlatformManager.cancelMedicationNotification(food.id)
+                            persistAndSync(
+                                appState.copy(foods = appState.foods.filterNot { it.id == food.id }),
+                                "Položka jídla ${food.name} byla odstraněna."
+                            )
+                        },
+                        onAddFoodClick = {
+                            editingFood = null
+                            showFoodDialog = true
+                        }
+                    )
+
                     MainTab.MEDS -> MedicationsTabScreen(
                         medications = appState.medications.filter { selectedCatIdFilter == null || it.catId == selectedCatIdFilter },
                         todayStr = todayStr,
@@ -387,6 +495,10 @@ fun App() {
                                 "Doplněno +15 dávek pro ${med.name}."
                             )
                         },
+                        onEditMed = { med ->
+                            editingMed = med
+                            showMedDialog = true
+                        },
                         onDeleteMed = { med ->
                             PlatformManager.cancelMedicationNotification(med.id)
                             persistAndSync(
@@ -394,10 +506,14 @@ fun App() {
                                 "Položka ${med.name} byla odstraněna."
                             )
                         },
-                        onAddMedClick = { showAddMedDialog = true }
+                        onAddMedClick = {
+                            editingMed = null
+                            showMedDialog = true
+                        }
                     )
 
                     MainTab.ALERTS -> NotificationsAndCloudTabScreen(
+                        foods = appState.foods,
                         medications = appState.medications,
                         notifications = appState.notifications,
                         familyCode = familyCode,
@@ -431,6 +547,7 @@ fun App() {
 
             BottomNavigationAndFooter(
                 activeTab = activeTab,
+                pendingFoodsCount = pendingFoodsToday,
                 pendingMedsCount = pendingMedsToday,
                 unreadNotifCount = unreadNotifCount,
                 onSelectTab = { activeTab = it }
@@ -465,24 +582,79 @@ fun App() {
             )
         }
 
-        if (showAddMedDialog) {
-            AddMedicationDialog(
+        if (showFoodDialog) {
+            AddOrEditFoodDialog(
                 cats = appState.cats,
-                onDismiss = { showAddMedDialog = false },
-                onAdd = { newMed ->
-                    showAddMedDialog = false
-                    if (newMed.notificationsEnabled) {
+                initialFood = editingFood,
+                onDismiss = {
+                    showFoodDialog = false
+                    editingFood = null
+                },
+                onSave = { savedFood ->
+                    val isEdit = editingFood != null
+                    showFoodDialog = false
+                    editingFood = null
+
+                    if (savedFood.notificationsEnabled) {
                         PlatformManager.scheduleMedicationNotification(
-                            id = newMed.id,
-                            catName = newMed.catName,
-                            medName = newMed.name,
-                            dosage = newMed.dosage,
-                            timeHhMm = newMed.timeOfDay
+                            id = savedFood.id,
+                            catName = savedFood.catName,
+                            medName = "🥣 Krmení: ${savedFood.name}",
+                            dosage = savedFood.portion,
+                            timeHhMm = savedFood.timeOfDay
                         )
+                    } else {
+                        PlatformManager.cancelMedicationNotification(savedFood.id)
                     }
+
+                    val updatedFoods = if (isEdit) {
+                        appState.foods.map { if (it.id == savedFood.id) savedFood else it }
+                    } else {
+                        listOf(savedFood) + appState.foods
+                    }
+
                     persistAndSync(
-                        appState.copy(medications = listOf(newMed) + appState.medications),
-                        "Přidán lék ${newMed.name} pro ${newMed.catName}!"
+                        appState.copy(foods = updatedFoods),
+                        if (isEdit) "Krmení ${savedFood.name} bylo upraveno!" else "Přidáno krmení ${savedFood.name} pro ${savedFood.catName}!"
+                    )
+                }
+            )
+        }
+
+        if (showMedDialog) {
+            AddOrEditMedicationDialog(
+                cats = appState.cats,
+                initialMed = editingMed,
+                onDismiss = {
+                    showMedDialog = false
+                    editingMed = null
+                },
+                onSave = { savedMed ->
+                    val isEdit = editingMed != null
+                    showMedDialog = false
+                    editingMed = null
+
+                    if (savedMed.notificationsEnabled) {
+                        PlatformManager.scheduleMedicationNotification(
+                            id = savedMed.id,
+                            catName = savedMed.catName,
+                            medName = savedMed.name,
+                            dosage = savedMed.dosage,
+                            timeHhMm = savedMed.timeOfDay
+                        )
+                    } else {
+                        PlatformManager.cancelMedicationNotification(savedMed.id)
+                    }
+
+                    val updatedMeds = if (isEdit) {
+                        appState.medications.map { if (it.id == savedMed.id) savedMed else it }
+                    } else {
+                        listOf(savedMed) + appState.medications
+                    }
+
+                    persistAndSync(
+                        appState.copy(medications = updatedMeds),
+                        if (isEdit) "Lék ${savedMed.name} byl upraven!" else "Přidán lék ${savedMed.name} pro ${savedMed.catName}!"
                     )
                 }
             )
@@ -554,6 +726,7 @@ fun App() {
 @Composable
 private fun TopHeaderBar(
     syncStatusText: String,
+    pendingFoodsToday: Int,
     pendingMedsToday: Int,
     onCloudClick: () -> Unit,
     onRefreshClick: () -> Unit
@@ -640,12 +813,16 @@ private fun TopHeaderBar(
                     )
                 }
 
-                val pillText = if (pendingMedsToday == 0) {
-                    "✨ Dnes vše podáno"
+                val pillText = if (pendingFoodsToday == 0 && pendingMedsToday == 0) {
+                    "✨ Vše dnes splněno"
                 } else {
-                    "💊 Dnes podat: $pendingMedsToday"
+                    "🥣 $pendingFoodsToday  •  💊 $pendingMedsToday"
                 }
-                val pillColor = if (pendingMedsToday == 0) Color(0xFFE6F6EC) else Color(0xFFFFE4EC)
+                val pillColor = if (pendingFoodsToday == 0 && pendingMedsToday == 0) {
+                    Color(0xFFE6F6EC)
+                } else {
+                    Color(0xFFFFE4EC)
+                }
 
                 Box(
                     modifier = Modifier
@@ -741,6 +918,7 @@ private fun CatQuickSelectorRow(
 @Composable
 private fun CatsTabScreen(
     cats: List<CatProfile>,
+    foods: List<FoodItem>,
     medications: List<MedicationItem>,
     todayStr: String,
     onPickRealPhoto: (CatProfile) -> Unit,
@@ -756,8 +934,8 @@ private fun CatsTabScreen(
         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
     ) {
         items(cats) { cat ->
-            val catMeds = medications.filter { it.catId == cat.id }
-            val pendingForCat = catMeds.count { it.lastGivenDate != todayStr }
+            val pendingFoodsForCat = foods.count { it.catId == cat.id && it.lastFedDate != todayStr }
+            val pendingMedsForCat = medications.count { it.catId == cat.id && it.lastGivenDate != todayStr }
 
             Card(
                 backgroundColor = BgBeigeLight,
@@ -925,10 +1103,15 @@ private fun CatsTabScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        val statusSummary = if (pendingFoodsForCat == 0 && pendingMedsForCat == 0) {
+                            "✅ Jídlo i léky podány"
+                        } else {
+                            "🥣 Jídlo: $pendingFoodsForCat  •  💊 Léky: $pendingMedsForCat"
+                        }
                         Text(
-                            text = if (pendingForCat == 0) "✅ Dnešní léky podány" else "💊 Dnes podat: $pendingForCat lék(y)",
-                            color = if (pendingForCat == 0) MintSuccess else BabyPinkDeep,
-                            fontSize = 12.sp,
+                            text = statusSummary,
+                            color = if (pendingFoodsForCat == 0 && pendingMedsForCat == 0) MintSuccess else BabyPinkDeep,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
 
@@ -941,7 +1124,7 @@ private fun CatsTabScreen(
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Text("✏️ Upravit stav a váhu", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("✏️ Upravit profil", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1231,12 +1414,232 @@ private fun StatusAndLogsTabScreen(
 }
 
 @Composable
+private fun FoodTabScreen(
+    foods: List<FoodItem>,
+    todayStr: String,
+    onMarkFedToday: (FoodItem) -> Unit,
+    onToggleNotification: (FoodItem) -> Unit,
+    onRefillPortions: (FoodItem) -> Unit,
+    onEditFood: (FoodItem) -> Unit,
+    onDeleteFood: (FoodItem) -> Unit,
+    onAddFoodClick: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)
+    ) {
+        item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "🥣 Jídelníček a krmení kočiček",
+                    color = CocoaBrown,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "Sleduj kapsičky, granulky, zásoby a časy krmení",
+                    color = CocoaMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onAddFoodClick,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = BabyPinkAccent,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                ) {
+                    Text(
+                        text = "➕ Přidat nové jídlo nebo kapsičku",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        items(foods) { food ->
+            val fedToday = food.lastFedDate == todayStr
+
+            Card(
+                backgroundColor = if (fedToday) Color(0xFFF3FAF5) else BgBeigeLight,
+                shape = RoundedCornerShape(18.dp),
+                elevation = 3.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = 1.5.dp,
+                        color = if (fedToday) MintSuccess.copy(alpha = 0.5f) else SoftBorder,
+                        shape = RoundedCornerShape(18.dp)
+                    )
+            ) {
+                Column(modifier = Modifier.padding(13.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(BabyPinkSoft)
+                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "🐾 ${food.catName}",
+                                color = CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(BgBeigeWarm)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "⏰ ${food.timeOfDay} (${food.frequency})",
+                                color = CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        // Tlačítko pro úpravu stávající položky jídla
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(BabyPinkCard)
+                                .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
+                                .clickable { onEditFood(food) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "✏️ Upravit",
+                                color = CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "🗑️",
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .clickable { onDeleteFood(food) }
+                                .padding(4.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = food.name,
+                        color = CocoaBrown,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        text = "Porce: ${food.portion}",
+                        color = CocoaMuted,
+                        fontSize = 12.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Zásoba porcí: ${food.remainingPortions}",
+                                color = if (food.remainingPortions <= 5) BabyPinkDeep else CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "+ Doplnit",
+                                color = BabyPinkDeep,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BabyPinkCard)
+                                    .clickable { onRefillPortions(food) }
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+
+                        if (food.lastFedDate.isNotBlank()) {
+                            Text(
+                                text = "Naposledy: ${food.lastFedDate}",
+                                color = CocoaMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = { onMarkFedToday(food) },
+                            enabled = !fedToday,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = if (fedToday) MintSuccess else BabyPinkAccent,
+                                contentColor = Color.White,
+                                disabledBackgroundColor = MintSuccess.copy(alpha = 0.8f),
+                                disabledContentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = if (fedToday) "✅ Dnes nakrmeno" else "🥣 Označit: Dnes nakrmeno",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { onToggleNotification(food) },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = if (food.notificationsEnabled) "🔔 ${food.timeOfDay}" else "🔕 Vypnuto",
+                                color = if (food.notificationsEnabled) BabyPinkDeep else CocoaMuted,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MedicationsTabScreen(
     medications: List<MedicationItem>,
     todayStr: String,
     onMarkGivenToday: (MedicationItem) -> Unit,
     onToggleNotification: (MedicationItem) -> Unit,
     onRefillDoses: (MedicationItem) -> Unit,
+    onEditMed: (MedicationItem) -> Unit,
     onDeleteMed: (MedicationItem) -> Unit,
     onAddMedClick: () -> Unit
 ) {
@@ -1256,7 +1659,7 @@ private fun MedicationsTabScreen(
                     fontWeight = FontWeight.ExtraBold
                 )
                 Text(
-                    text = "Odškrtni podání léku nebo zapni upozornění na čas",
+                    text = "Odškrtni podání léku, uprav dávkování nebo zapni upozornění",
                     color = CocoaMuted,
                     fontSize = 11.sp
                 )
@@ -1314,7 +1717,7 @@ private fun MedicationsTabScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
@@ -1329,6 +1732,24 @@ private fun MedicationsTabScreen(
                             )
                         }
                         Spacer(modifier = Modifier.weight(1f))
+
+                        // Tlačítko pro úpravu stávajícího léku
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(BabyPinkCard)
+                                .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
+                                .clickable { onEditMed(med) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "✏️ Upravit",
+                                color = CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "🗑️",
                             fontSize = 14.sp,
@@ -1432,6 +1853,7 @@ private fun MedicationsTabScreen(
 
 @Composable
 private fun NotificationsAndCloudTabScreen(
+    foods: List<FoodItem>,
     medications: List<MedicationItem>,
     notifications: List<AppNotificationItem>,
     familyCode: String,
@@ -1441,7 +1863,8 @@ private fun NotificationsAndCloudTabScreen(
     onMarkAllRead: () -> Unit,
     onOpenCloudSettings: () -> Unit
 ) {
-    val activeAlarms = medications.filter { it.notificationsEnabled }
+    val activeFoodAlarms = foods.filter { it.notificationsEnabled }
+    val activeMedAlarms = medications.filter { it.notificationsEnabled }
 
     LazyColumn(
         modifier = Modifier
@@ -1461,27 +1884,54 @@ private fun NotificationsAndCloudTabScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "🔔 Upozornění na léky a péči",
+                        text = "🔔 Upozornění na krmení a léky",
                         color = CocoaBrown,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Aktivní denní časy upozornění pro Safírku a Zlatína (${activeAlarms.size}):",
+                        text = "Aktivní časy upozornění (${activeFoodAlarms.size + activeMedAlarms.size}):",
                         color = CocoaMuted,
                         fontSize = 12.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (activeAlarms.isEmpty()) {
+                    if (activeFoodAlarms.isEmpty() && activeMedAlarms.isEmpty()) {
                         Text(
-                            text = "Zatím nejsou zapnuté žádné budíky léků. Zapni je v záložce Léky.",
+                            text = "Zatím nejsou zapnuté žádné budíky. Zapni je v záložce Jídlo nebo Léky.",
                             color = CocoaMuted,
                             fontSize = 12.sp
                         )
                     } else {
-                        activeAlarms.forEach { alarm ->
+                        activeFoodAlarms.forEach { alarm ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BgBeigeWarm)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "🥣 ${alarm.timeOfDay} • ${alarm.catName}: ${alarm.name}",
+                                    color = CocoaBrown,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "Zapnuto",
+                                    color = MintSuccess,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        activeMedAlarms.forEach { alarm ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1493,7 +1943,7 @@ private fun NotificationsAndCloudTabScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "⏰ ${alarm.timeOfDay} • ${alarm.catName}: ${alarm.name}",
+                                    text = "💊 ${alarm.timeOfDay} • ${alarm.catName}: ${alarm.name}",
                                     color = CocoaBrown,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -1557,7 +2007,7 @@ private fun NotificationsAndCloudTabScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Při ztrátě nebo výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, reálné fotky i léky se ihned obnoví.",
+                        text = "Při ztrátě nebo výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, reálné fotky, jídlo i léky se ihned obnoví.",
                         color = CocoaMuted,
                         fontSize = 11.sp
                     )
@@ -1642,6 +2092,7 @@ private fun NotificationsAndCloudTabScreen(
 @Composable
 private fun BottomNavigationAndFooter(
     activeTab: MainTab,
+    pendingFoodsCount: Int,
     pendingMedsCount: Int,
     unreadNotifCount: Int,
     onSelectTab: (MainTab) -> Unit
@@ -1658,12 +2109,13 @@ private fun BottomNavigationAndFooter(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 MainTab.values().forEach { tab ->
                     val selected = activeTab == tab
                     val badgeCount = when (tab) {
+                        MainTab.FOOD -> pendingFoodsCount
                         MainTab.MEDS -> pendingMedsCount
                         MainTab.ALERTS -> unreadNotifCount
                         else -> 0
@@ -1672,28 +2124,28 @@ private fun BottomNavigationAndFooter(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 3.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .padding(horizontal = 2.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(if (selected) BabyPinkSoft else Color.Transparent)
                             .clickable { onSelectTab(tab) }
-                            .padding(vertical = 6.dp),
+                            .padding(vertical = 5.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = tab.icon, fontSize = 16.sp)
+                                Text(text = tab.icon, fontSize = 15.sp)
                                 if (badgeCount > 0) {
-                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Spacer(modifier = Modifier.width(2.dp))
                                     Box(
                                         modifier = Modifier
                                             .clip(CircleShape)
                                             .background(BabyPinkDeep)
-                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
                                     ) {
                                         Text(
                                             text = badgeCount.toString(),
                                             color = Color.White,
-                                            fontSize = 9.sp,
+                                            fontSize = 8.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -1702,7 +2154,9 @@ private fun BottomNavigationAndFooter(
                             Text(
                                 text = tab.label,
                                 color = if (selected) CocoaBrown else CocoaMuted,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium
                             )
                         }
@@ -1980,17 +2434,23 @@ private fun AddCatDialog(
 }
 
 @Composable
-private fun AddMedicationDialog(
+private fun AddOrEditFoodDialog(
     cats: List<CatProfile>,
+    initialFood: FoodItem?,
     onDismiss: () -> Unit,
-    onAdd: (MedicationItem) -> Unit
+    onSave: (FoodItem) -> Unit
 ) {
-    var selectedCat by remember { mutableStateOf(cats.firstOrNull()) }
-    var medName by remember { mutableStateOf("") }
-    var dosage by remember { mutableStateOf("1 tableta / dávka") }
-    var timeOfDay by remember { mutableStateOf("08:00") }
-    var frequency by remember { mutableStateOf("Denně") }
-    var dosesText by remember { mutableStateOf("20") }
+    val isEdit = initialFood != null
+    var selectedCat by remember {
+        mutableStateOf(
+            cats.find { it.id == initialFood?.catId } ?: cats.firstOrNull()
+        )
+    }
+    var foodName by remember { mutableStateOf(initialFood?.name ?: "") }
+    var portion by remember { mutableStateOf(initialFood?.portion ?: "1 kapsička (85 g)") }
+    var timeOfDay by remember { mutableStateOf(initialFood?.timeOfDay ?: "07:30") }
+    var frequency by remember { mutableStateOf(initialFood?.frequency ?: "Denně") }
+    var portionsText by remember { mutableStateOf((initialFood?.remainingPortions ?: 20).toString()) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -2003,7 +2463,164 @@ private fun AddMedicationDialog(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "💊 Přidat lék nebo vitamín",
+                    text = if (isEdit) "✏️ Upravit krmení" else "🥣 Přidat jídlo nebo kapsičku",
+                    color = CocoaBrown,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Pro kočičku:", color = CocoaBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    cats.forEach { cat ->
+                        val sel = selectedCat?.id == cat.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (sel) BabyPinkAccent else BabyPinkCard)
+                                .clickable { selectedCat = cat }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = cat.name,
+                                color = if (sel) Color.White else CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = foodName,
+                    onValueChange = { foodName = it },
+                    label = { Text("Název jídla / kapsičky / granulek") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = portion,
+                    onValueChange = { portion = it },
+                    label = { Text("Velikost porce (např. 1 kapsička / 50 g)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = timeOfDay,
+                        onValueChange = { timeOfDay = it },
+                        label = { Text("Čas (HH:MM)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = portionsText,
+                        onValueChange = { portionsText = it },
+                        label = { Text("Zásoba kusů") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Denně", "Obden", "Pamlsek").forEach { freq ->
+                        val sel = frequency == freq
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (sel) BabyPinkAccent else BgBeigeWarm)
+                                .clickable { frequency = freq }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = freq,
+                                color = if (sel) Color.White else CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Zrušit", color = CocoaMuted)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            val targetCat = selectedCat ?: cats.firstOrNull()
+                            if (targetCat != null) {
+                                onSave(
+                                    FoodItem(
+                                        id = initialFood?.id ?: "food_${PlatformManager.currentTimeMillis()}",
+                                        catId = targetCat.id,
+                                        catName = targetCat.name,
+                                        name = foodName.ifBlank { "Masová kapsička" },
+                                        portion = portion.ifBlank { "1 porce" },
+                                        timeOfDay = timeOfDay.ifBlank { "07:30" },
+                                        frequency = frequency,
+                                        remainingPortions = portionsText.toIntOrNull() ?: 20,
+                                        lastFedDate = initialFood?.lastFedDate ?: "",
+                                        notificationsEnabled = initialFood?.notificationsEnabled ?: true
+                                    )
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
+                    ) {
+                        Text(
+                            text = if (isEdit) "Uložit změny" else "Uložit a zapnout 🔔",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddOrEditMedicationDialog(
+    cats: List<CatProfile>,
+    initialMed: MedicationItem?,
+    onDismiss: () -> Unit,
+    onSave: (MedicationItem) -> Unit
+) {
+    val isEdit = initialMed != null
+    var selectedCat by remember {
+        mutableStateOf(
+            cats.find { it.id == initialMed?.catId } ?: cats.firstOrNull()
+        )
+    }
+    var medName by remember { mutableStateOf(initialMed?.name ?: "") }
+    var dosage by remember { mutableStateOf(initialMed?.dosage ?: "1 tableta / dávka") }
+    var timeOfDay by remember { mutableStateOf(initialMed?.timeOfDay ?: "08:00") }
+    var frequency by remember { mutableStateOf(initialMed?.frequency ?: "Denně") }
+    var dosesText by remember { mutableStateOf((initialMed?.remainingDoses ?: 20).toString()) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            backgroundColor = BgBeigeLight,
+            shape = RoundedCornerShape(20.dp),
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = if (isEdit) "✏️ Upravit lék nebo vitamín" else "💊 Přidat lék nebo vitamín",
                     color = CocoaBrown,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold
@@ -2068,19 +2685,19 @@ private fun AddMedicationDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Denně", "Obden", "1x týdně").forEach { freq ->
+                    listOf("Denně", "Obden", "1x týdně", "Podle potřeby").forEach { freq ->
                         val sel = frequency == freq
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (sel) BabyPinkAccent else BgBeigeWarm)
                                 .clickable { frequency = freq }
-                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text(
                                 text = freq,
                                 color = if (sel) Color.White else CocoaBrown,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -2100,9 +2717,9 @@ private fun AddMedicationDialog(
                         onClick = {
                             val targetCat = selectedCat ?: cats.firstOrNull()
                             if (targetCat != null) {
-                                onAdd(
+                                onSave(
                                     MedicationItem(
-                                        id = "med_${PlatformManager.currentTimeMillis()}",
+                                        id = initialMed?.id ?: "med_${PlatformManager.currentTimeMillis()}",
                                         catId = targetCat.id,
                                         catName = targetCat.name,
                                         name = medName.ifBlank { "Vitamínová pasta" },
@@ -2110,15 +2727,19 @@ private fun AddMedicationDialog(
                                         timeOfDay = timeOfDay.ifBlank { "08:00" },
                                         frequency = frequency,
                                         remainingDoses = dosesText.toIntOrNull() ?: 20,
-                                        lastGivenDate = "",
-                                        notificationsEnabled = true
+                                        lastGivenDate = initialMed?.lastGivenDate ?: "",
+                                        notificationsEnabled = initialMed?.notificationsEnabled ?: true
                                     )
                                 )
                             }
                         },
                         colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent)
                     ) {
-                        Text("Uložit a zapnout 🔔", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = if (isEdit) "Uložit změny" else "Uložit a zapnout 🔔",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
