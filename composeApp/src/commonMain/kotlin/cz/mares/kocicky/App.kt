@@ -60,7 +60,7 @@ fun App() {
             if (familyCode.isNotBlank() && familyPin.isNotBlank()) {
                 "☁️ Připojování ($familyCode)..."
             } else {
-                "📱 V telefonu (klepni pro ☁️)"
+                "📱 Pouze v telefonu (nepřihlášeno)"
             }
         )
     }
@@ -93,7 +93,7 @@ fun App() {
         }
 
         if (familyCode.isBlank() || familyPin.isBlank()) {
-            syncStatusText = "📱 V telefonu (klepni pro ☁️)"
+            syncStatusText = "📱 Pouze v telefonu (nepřihlášeno)"
             return
         }
 
@@ -140,7 +140,7 @@ fun App() {
         manualLogin: Boolean = false
     ) {
         if (targetCode.isBlank() || targetPin.isBlank()) {
-            syncStatusText = "📱 V telefonu (klepni pro ☁️)"
+            syncStatusText = "📱 Pouze v telefonu (nepřihlášeno)"
             return
         }
 
@@ -171,7 +171,7 @@ fun App() {
             } else if (ok && (remoteJson == null || remoteJson == "null")) {
                 syncStatusText = "⚠️ Účet/PIN nenalezen"
                 if (manualLogin) {
-                    bannerMessage = "Pod účtem '$targetCode' a zadaným PINem na serveru nic není. Zkontroluj překlep, nebo v ☁️ zvol 'Nahrát tento telefon na server'."
+                    bannerMessage = "Pod účtem '$targetCode' a zadaným PINem na serveru nic není. Zkontroluj překlep, nebo zvol 'Nahrát tento telefon na server'."
                 }
             } else {
                 syncStatusText = "📱 Offline / Chyba ($info)"
@@ -217,17 +217,8 @@ fun App() {
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
             TopHeaderBar(
-                syncStatusText = syncStatusText,
                 pendingFoodsToday = pendingFoodsToday,
-                pendingMedsToday = pendingMedsToday,
-                onCloudClick = { showCloudDialog = true },
-                onRefreshClick = {
-                    if (isCloudLogged) {
-                        pullFromServer(familyCode, familyPin, manualLogin = true)
-                    } else {
-                        showCloudDialog = true
-                    }
-                }
+                pendingMedsToday = pendingMedsToday
             )
 
             if (bannerMessage != null) {
@@ -280,6 +271,9 @@ fun App() {
                         foods = appState.foods,
                         medications = appState.medications,
                         todayStr = todayStr,
+                        familyCode = familyCode,
+                        isCloudLogged = isCloudLogged,
+                        syncStatusText = syncStatusText,
                         onPickRealPhoto = { cat ->
                             PlatformManager.pickPhotoFromGallery { base64Photo ->
                                 if (!base64Photo.isNullOrBlank()) {
@@ -315,7 +309,15 @@ fun App() {
                             )
                         },
                         onEditCat = { editingCat = it },
-                        onAddCat = { showAddCatDialog = true }
+                        onAddCat = { showAddCatDialog = true },
+                        onOpenCloudSettings = { showCloudDialog = true },
+                        onRefreshCloud = {
+                            if (isCloudLogged) {
+                                pullFromServer(familyCode, familyPin, manualLogin = true)
+                            } else {
+                                showCloudDialog = true
+                            }
+                        }
                     )
 
                     MainTab.STATUS -> StatusAndLogsTabScreen(
@@ -512,13 +514,10 @@ fun App() {
                         }
                     )
 
-                    MainTab.ALERTS -> NotificationsAndCloudTabScreen(
+                    MainTab.ALERTS -> NotificationsTabScreen(
                         foods = appState.foods,
                         medications = appState.medications,
                         notifications = appState.notifications,
-                        familyCode = familyCode,
-                        isCloudLogged = isCloudLogged,
-                        syncStatusText = syncStatusText,
                         onTestSystemNotification = {
                             PlatformManager.sendImmediateTestNotification(
                                 title = "🐾 Terezčiny Kočičky – Safírka & Zlatín",
@@ -539,8 +538,7 @@ fun App() {
                         onMarkAllRead = {
                             val marked = appState.notifications.map { it.copy(isRead = true) }
                             persistAndSync(appState.copy(notifications = marked))
-                        },
-                        onOpenCloudSettings = { showCloudDialog = true }
+                        }
                     )
                 }
             }
@@ -714,7 +712,7 @@ fun App() {
                     familyPin = ""
                     PlatformManager.saveFamilyCode("")
                     PlatformManager.saveFamilyPin("")
-                    syncStatusText = "📱 V telefonu (klepni pro ☁️)"
+                    syncStatusText = "📱 Pouze v telefonu (nepřihlášeno)"
                     showCloudDialog = false
                     bannerMessage = "Server byl odpojen. Data zůstávají bezpečně v telefonu."
                 }
@@ -725,119 +723,75 @@ fun App() {
 
 @Composable
 private fun TopHeaderBar(
-    syncStatusText: String,
     pendingFoodsToday: Int,
-    pendingMedsToday: Int,
-    onCloudClick: () -> Unit,
-    onRefreshClick: () -> Unit
+    pendingMedsToday: Int
 ) {
     Surface(
         color = BabyPinkCard,
         elevation = 3.dp,
-        shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp),
+        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(BabyPinkSoft)
+                    .border(1.5.dp, BabyPinkAccent, CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(BabyPinkSoft)
-                        .border(1.5.dp, BabyPinkAccent, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("🐱", fontSize = 19.sp)
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Terezčiny Kočičky",
-                        color = CocoaBrown,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "Safírka (Ragdollka) & Zlatín (Mainská mývalí)",
-                        color = CocoaMuted,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(BgBeigeWarm)
-                        .border(1.dp, SoftBorder, RoundedCornerShape(12.dp))
-                        .clickable { onRefreshClick() }
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
-                ) {
-                    Text("🔄", fontSize = 14.sp)
-                }
+                Text("🐱", fontSize = 18.sp)
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Terezčiny Kočičky",
+                    color = CocoaBrown,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Safírka & Zlatín",
+                    color = CocoaMuted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            val pillText = if (pendingFoodsToday == 0 && pendingMedsToday == 0) {
+                "✨ Vše splněno"
+            } else {
+                "🥣 $pendingFoodsToday  •  💊 $pendingMedsToday"
+            }
+            val pillColor = if (pendingFoodsToday == 0 && pendingMedsToday == 0) {
+                Color(0xFFE6F6EC)
+            } else {
+                Color(0xFFFFE4EC)
+            }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(pillColor)
+                    .border(1.dp, SoftBorder, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(BgBeigeLight)
-                        .border(1.dp, SoftBorder, RoundedCornerShape(10.dp))
-                        .clickable { onCloudClick() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = syncStatusText,
-                        color = CocoaBrown,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                val pillText = if (pendingFoodsToday == 0 && pendingMedsToday == 0) {
-                    "✨ Vše dnes splněno"
-                } else {
-                    "🥣 $pendingFoodsToday  •  💊 $pendingMedsToday"
-                }
-                val pillColor = if (pendingFoodsToday == 0 && pendingMedsToday == 0) {
-                    Color(0xFFE6F6EC)
-                } else {
-                    Color(0xFFFFE4EC)
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(pillColor)
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = pillText,
-                        color = CocoaBrown,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
-                    )
-                }
+                Text(
+                    text = pillText,
+                    color = CocoaBrown,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
             }
         }
     }
@@ -871,7 +825,8 @@ private fun CatQuickSelectorRow(
                     text = "🐾 Všechny (${cats.size})",
                     color = if (isAll) Color.White else CocoaBrown,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                 )
             }
         }
@@ -890,7 +845,8 @@ private fun CatQuickSelectorRow(
                     text = "${if (cat.breedType == "RAGDOLL") "💎" else if (cat.breedType == "MAINE_COON") "🦁" else "🐱"} ${cat.name}",
                     color = if (isSelected) Color.White else CocoaBrown,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                 )
             }
         }
@@ -908,7 +864,8 @@ private fun CatQuickSelectorRow(
                     text = "+ Další kočička",
                     color = BabyPinkDeep,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                 )
             }
         }
@@ -921,10 +878,15 @@ private fun CatsTabScreen(
     foods: List<FoodItem>,
     medications: List<MedicationItem>,
     todayStr: String,
+    familyCode: String,
+    isCloudLogged: Boolean,
+    syncStatusText: String,
     onPickRealPhoto: (CatProfile) -> Unit,
     onResetToBreedIllustration: (CatProfile) -> Unit,
     onEditCat: (CatProfile) -> Unit,
-    onAddCat: () -> Unit
+    onAddCat: () -> Unit,
+    onOpenCloudSettings: () -> Unit,
+    onRefreshCloud: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -947,17 +909,21 @@ private fun CatsTabScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CatAvatar(cat = cat, size = 86.dp)
+                        CatAvatar(cat = cat, size = 84.dp)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 Text(
                                     text = cat.name,
                                     color = CocoaBrown,
-                                    fontSize = 19.sp,
-                                    fontWeight = FontWeight.ExtraBold
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(10.dp))
@@ -967,8 +933,9 @@ private fun CatsTabScreen(
                                     Text(
                                         text = cat.breed,
                                         color = CocoaBrown,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -980,7 +947,6 @@ private fun CatsTabScreen(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Kontrola: ${cat.lastCheckedDate}",
                                 color = CocoaMuted,
@@ -988,7 +954,10 @@ private fun CatsTabScreen(
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Button(
                                     onClick = { onPickRealPhoto(cat) },
                                     colors = ButtonDefaults.buttonColors(
@@ -996,20 +965,28 @@ private fun CatsTabScreen(
                                         contentColor = Color.White
                                     ),
                                     shape = RoundedCornerShape(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
-                                    modifier = Modifier.height(30.dp)
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
-                                    Text("📷 Nahrát fotku", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "📷 Fotka",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
                                 }
 
                                 if (cat.photoBase64.isNotBlank()) {
                                     OutlinedButton(
                                         onClick = { onResetToBreedIllustration(cat) },
                                         shape = RoundedCornerShape(12.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp),
-                                        modifier = Modifier.height(30.dp)
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                                     ) {
-                                        Text("🎨 Ilustrace", fontSize = 11.sp, color = CocoaBrown)
+                                        Text(
+                                            text = "🎨 Ilustrace",
+                                            fontSize = 11.sp,
+                                            color = CocoaBrown,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                             }
@@ -1112,8 +1089,11 @@ private fun CatsTabScreen(
                             text = statusSummary,
                             color = if (pendingFoodsForCat == 0 && pendingMedsForCat == 0) MintSuccess else BabyPinkDeep,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
                         )
+
+                        Spacer(modifier = Modifier.width(8.dp))
 
                         Button(
                             onClick = { onEditCat(cat) },
@@ -1122,9 +1102,14 @@ private fun CatsTabScreen(
                                 contentColor = CocoaBrown
                             ),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)
                         ) {
-                            Text("✏️ Upravit profil", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "✏️ Upravit",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
                         }
                     }
                 }
@@ -1135,16 +1120,92 @@ private fun CatsTabScreen(
             OutlinedButton(
                 onClick = onAddCat,
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(46.dp)
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "🐾 Přidat další kočičku do rodiny",
                     color = BabyPinkDeep,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
                 )
+            }
+        }
+
+        // Karta pro synchronizaci a zálohu přímo v záložce Kočičky
+        item {
+            Card(
+                backgroundColor = BabyPinkCard,
+                shape = RoundedCornerShape(18.dp),
+                elevation = 2.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, BabyPinkAccent, RoundedCornerShape(18.dp))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "☁️ Synchronizace a záloha na server",
+                        color = CocoaBrown,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isCloudLogged) {
+                            "Účet: $familyCode (chráněno PINem)  •  $syncStatusText"
+                        } else {
+                            "Stav: $syncStatusText"
+                        },
+                        color = CocoaBrown,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Při výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, fotky, jídlo i léky se ihned obnoví.",
+                        color = CocoaMuted,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onOpenCloudSettings,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = BabyPinkAccent,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 9.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "🔐 Účet a PIN",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onRefreshCloud,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 9.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "🔄 Obnovit data",
+                                color = CocoaBrown,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1339,14 +1400,14 @@ private fun StatusAndLogsTabScreen(
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(42.dp)
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "➕ Přidat nový záznam do deníčku",
+                        text = "➕ Přidat záznam do deníčku",
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -1452,14 +1513,14 @@ private fun FoodTabScreen(
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "➕ Přidat nové jídlo nebo kapsičku",
+                        text = "➕ Přidat jídlo nebo kapsičku",
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -1485,59 +1546,77 @@ private fun FoodTabScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(BabyPinkSoft)
-                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "🐾 ${food.catName}",
-                                color = CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BabyPinkSoft)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🐾 ${food.catName}",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BgBeigeWarm)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "⏰ ${food.timeOfDay}",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(BgBeigeWarm)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "⏰ ${food.timeOfDay} (${food.frequency})",
-                                color = CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
 
-                        // Tlačítko pro úpravu stávající položky jídla
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(BabyPinkCard)
-                                .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
-                                .clickable { onEditFood(food) }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "✏️ Upravit",
-                                color = CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BabyPinkCard)
+                                    .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
+                                    .clickable { onEditFood(food) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "✏️ Upravit",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BgBeigeWarm)
+                                    .clickable { onDeleteFood(food) }
+                                    .padding(horizontal = 7.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🗑️",
+                                    fontSize = 13.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "🗑️",
-                            fontSize = 14.sp,
-                            modifier = Modifier
-                                .clickable { onDeleteFood(food) }
-                                .padding(4.dp)
-                        )
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1548,7 +1627,7 @@ private fun FoodTabScreen(
                         fontWeight = FontWeight.ExtraBold
                     )
                     Text(
-                        text = "Porce: ${food.portion}",
+                        text = "Porce: ${food.portion}  •  ${food.frequency}",
                         color = CocoaMuted,
                         fontSize = 12.sp
                     )
@@ -1561,7 +1640,7 @@ private fun FoodTabScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "Zásoba porcí: ${food.remainingPortions}",
+                                text = "Zásoba: ${food.remainingPortions} ks",
                                 color = if (food.remainingPortions <= 5) BabyPinkDeep else CocoaBrown,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
@@ -1605,24 +1684,28 @@ private fun FoodTabScreen(
                                 disabledContentColor = Color.White
                             ),
                             shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = if (fedToday) "✅ Dnes nakrmeno" else "🥣 Označit: Dnes nakrmeno",
+                                text = if (fedToday) "✅ Dnes nakrmeno" else "🥣 Dnes nakrmeno",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
                             )
                         }
 
                         OutlinedButton(
                             onClick = { onToggleNotification(food) },
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
                         ) {
                             Text(
                                 text = if (food.notificationsEnabled) "🔔 ${food.timeOfDay}" else "🔕 Vypnuto",
                                 color = if (food.notificationsEnabled) BabyPinkDeep else CocoaMuted,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -1671,14 +1754,14 @@ private fun MedicationsTabScreen(
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "➕ Přidat nový lék nebo vitamín",
+                        text = "➕ Přidat lék nebo vitamín",
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -1704,59 +1787,77 @@ private fun MedicationsTabScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(BabyPinkSoft)
-                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "🐾 ${med.catName}",
-                                color = CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BabyPinkSoft)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🐾 ${med.catName}",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BgBeigeWarm)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "⏰ ${med.timeOfDay}",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(BgBeigeWarm)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "⏰ ${med.timeOfDay} (${med.frequency})",
-                                color = CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
 
-                        // Tlačítko pro úpravu stávajícího léku
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(BabyPinkCard)
-                                .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
-                                .clickable { onEditMed(med) }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "✏️ Upravit",
-                                color = CocoaBrown,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BabyPinkCard)
+                                    .border(1.dp, SoftBorder, RoundedCornerShape(8.dp))
+                                    .clickable { onEditMed(med) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "✏️ Upravit",
+                                    color = CocoaBrown,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BgBeigeWarm)
+                                    .clickable { onDeleteMed(med) }
+                                    .padding(horizontal = 7.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🗑️",
+                                    fontSize = 13.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "🗑️",
-                            fontSize = 14.sp,
-                            modifier = Modifier
-                                .clickable { onDeleteMed(med) }
-                                .padding(4.dp)
-                        )
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1767,7 +1868,7 @@ private fun MedicationsTabScreen(
                         fontWeight = FontWeight.ExtraBold
                     )
                     Text(
-                        text = "Dávkování: ${med.dosage}",
+                        text = "Dávka: ${med.dosage}  •  ${med.frequency}",
                         color = CocoaMuted,
                         fontSize = 12.sp
                     )
@@ -1780,7 +1881,7 @@ private fun MedicationsTabScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "Zbývá dávek: ${med.remainingDoses}",
+                                text = "Zbývá: ${med.remainingDoses} dávek",
                                 color = if (med.remainingDoses <= 5) BabyPinkDeep else CocoaBrown,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
@@ -1824,24 +1925,28 @@ private fun MedicationsTabScreen(
                                 disabledContentColor = Color.White
                             ),
                             shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = if (givenToday) "✅ Dnes již podáno" else "💊 Označit: Dnes podáno",
+                                text = if (givenToday) "✅ Dnes podáno" else "💊 Dnes podáno",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
                             )
                         }
 
                         OutlinedButton(
                             onClick = { onToggleNotification(med) },
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
                         ) {
                             Text(
                                 text = if (med.notificationsEnabled) "🔔 ${med.timeOfDay}" else "🔕 Vypnuto",
                                 color = if (med.notificationsEnabled) BabyPinkDeep else CocoaMuted,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -1852,16 +1957,12 @@ private fun MedicationsTabScreen(
 }
 
 @Composable
-private fun NotificationsAndCloudTabScreen(
+private fun NotificationsTabScreen(
     foods: List<FoodItem>,
     medications: List<MedicationItem>,
     notifications: List<AppNotificationItem>,
-    familyCode: String,
-    isCloudLogged: Boolean,
-    syncStatusText: String,
     onTestSystemNotification: () -> Unit,
-    onMarkAllRead: () -> Unit,
-    onOpenCloudSettings: () -> Unit
+    onMarkAllRead: () -> Unit
 ) {
     val activeFoodAlarms = foods.filter { it.notificationsEnabled }
     val activeMedAlarms = medications.filter { it.notificationsEnabled }
@@ -1967,61 +2068,14 @@ private fun NotificationsAndCloudTabScreen(
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "🔔 Vyzkoušet notifikaci v telefonu hned teď",
+                            text = "🔔 Vyzkoušet notifikaci v telefonu",
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(
-                backgroundColor = BabyPinkCard,
-                shape = RoundedCornerShape(18.dp),
-                elevation = 2.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, BabyPinkAccent, RoundedCornerShape(18.dp))
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "☁️ Zabezpečená záloha na server (Účet + PIN)",
-                        color = CocoaBrown,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (isCloudLogged) {
-                            "Přihlášený účet: $familyCode (chráněno PINem) • $syncStatusText"
-                        } else {
-                            "Stav: Nepřihlášeno – data jsou uložena pouze v tomto telefonu"
-                        },
-                        color = CocoaBrown,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Při ztrátě nebo výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, reálné fotky, jídlo i léky se ihned obnoví.",
-                        color = CocoaMuted,
-                        fontSize = 11.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = onOpenCloudSettings,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "🔐 Nastavit Rodinný účet a PIN",
-                            color = CocoaBrown,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -2938,13 +2992,15 @@ private fun CloudSyncDialog(
                     enabled = !isSyncing,
                     colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkAccent),
                     shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = "⬇️ Přihlásit a stáhnout ze serveru",
                         color = Color.White,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                     )
                 }
 
@@ -2955,13 +3011,15 @@ private fun CloudSyncDialog(
                     enabled = !isSyncing,
                     colors = ButtonDefaults.buttonColors(backgroundColor = BabyPinkSoft),
                     shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "⬆️ Založit / Nahrát tento telefon na server",
+                        text = "⬆️ Založit / Nahrát tento telefon",
                         color = CocoaBrown,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                     )
                 }
 
