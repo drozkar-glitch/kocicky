@@ -15,7 +15,10 @@ data class CatProfile(
     val notes: String,
     val photoBase64: String,
     val lastCheckedDate: String,
-    val birthDate: String = "14. 5. 2024"
+    val birthDate: String = "14. 5. 2024",
+    val insuranceName: String = "PetExpert",
+    val insuranceFrom: String = "1. 1. 2026",
+    val insuranceTo: String = "31. 12. 2026"
 )
 
 data class FoodItem(
@@ -83,6 +86,78 @@ data class CatAppState(
     val foods: List<FoodItem> = DefaultCatData.defaultFoods(),
     val vetVisits: List<VetVisitItem> = DefaultCatData.defaultVetVisits()
 )
+
+object CatAgeCalculator {
+
+    private data class ParsedDate(val day: Int, val month: Int, val year: Int)
+
+    private fun parseCzDate(raw: String): ParsedDate? {
+        val cleaned = raw.trim().replace("/", ".").replace("-", ".")
+        val parts = cleaned.split(".").map { it.trim() }.filter { it.isNotEmpty() }
+        if (parts.size < 3) return null
+        val p0 = parts[0].toIntOrNull() ?: return null
+        val p1 = parts[1].toIntOrNull() ?: return null
+        val p2 = parts[2].toIntOrNull() ?: return null
+
+        // Podpora formátu DD.MM.RRRR i RRRR.MM.DD
+        return if (p0 > 1900) {
+            ParsedDate(day = p2.coerceIn(1, 31), month = p1.coerceIn(1, 12), year = p0)
+        } else {
+            val yr = if (p2 < 100) 2000 + p2 else p2
+            ParsedDate(day = p0.coerceIn(1, 31), month = p1.coerceIn(1, 12), year = yr)
+        }
+    }
+
+    private fun totalMonthsBetween(birthRaw: String, todayRaw: String): Int? {
+        val b = parseCzDate(birthRaw) ?: return null
+        val t = parseCzDate(todayRaw) ?: return null
+        var months = (t.year - b.year) * 12 + (t.month - b.month)
+        if (t.day < b.day) {
+            months -= 1
+        }
+        return months.coerceAtLeast(0)
+    }
+
+    fun formatActualAge(birthDate: String, todayDate: String = PlatformManager.currentDateString()): String? {
+        val totalMonths = totalMonthsBetween(birthDate, todayDate) ?: return null
+        val years = totalMonths / 12
+        val remMonths = totalMonths % 12
+        return when {
+            years == 0 && remMonths <= 0 -> "méně než 1 měs."
+            years == 0 -> "$remMonths měs."
+            remMonths == 0 -> when (years) {
+                1 -> "1 rok"
+                in 2..4 -> "$years roky"
+                else -> "$years let"
+            }
+            else -> "$years r. $remMonths měs."
+        }
+    }
+
+    fun calculateAnimalHumanYears(birthDate: String, todayDate: String = PlatformManager.currentDateString()): Int? {
+        val totalMonths = totalMonthsBetween(birthDate, todayDate) ?: return null
+        return when {
+            totalMonths <= 0 -> 1
+            totalMonths <= 12 -> ((totalMonths * 15) / 12).coerceAtLeast(1)
+            totalMonths <= 24 -> 15 + ((totalMonths - 12) * 9) / 12
+            else -> 24 + ((totalMonths - 24) * 4) / 12
+        }
+    }
+
+    fun formatFullAgeSummary(
+        birthDate: String,
+        fallbackAgeText: String = "",
+        todayDate: String = PlatformManager.currentDateString()
+    ): String {
+        val actual = formatActualAge(birthDate, todayDate)
+        val animalYears = calculateAnimalHumanYears(birthDate, todayDate)
+        return if (actual != null && animalYears != null) {
+            "$actual (🐾 kočičí věk: ~$animalYears let)"
+        } else {
+            fallbackAgeText.ifBlank { "Nezadáno" }
+        }
+    }
+}
 
 object DefaultCatData {
 
@@ -179,7 +254,10 @@ object DefaultCatData {
             notes = "Modrooká princezna Safírka. Miluje chování v náručí, drbání pod bradičkou a odpočinek na měkkém polštářku.",
             photoBase64 = "",
             lastCheckedDate = today,
-            birthDate = "14. 5. 2024"
+            birthDate = "14. 5. 2024",
+            insuranceName = "PetExpert",
+            insuranceFrom = "1. 1. 2026",
+            insuranceTo = "31. 12. 2026"
         )
 
         val zlatin = CatProfile(
@@ -197,7 +275,10 @@ object DefaultCatData {
             notes = "Majestátní Mainský mývalí kocour s krásnými štětičkami na uších a huňatým ocasem. Rád pozoruje ptáčky a povídá si.",
             photoBase64 = "",
             lastCheckedDate = today,
-            birthDate = "20. 8. 2023"
+            birthDate = "20. 8. 2023",
+            insuranceName = "PetExpert",
+            insuranceFrom = "1. 1. 2026",
+            insuranceTo = "31. 12. 2026"
         )
 
         val meds = listOf(
@@ -275,8 +356,8 @@ object DefaultCatData {
         val notifs = listOf(
             AppNotificationItem(
                 id = "notif_init_1",
-                title = "🐾 Vítej v Terezčiných Kočičkách!",
-                message = "Safírka (Ragdollka) a Zlatín (Mainská mývalí) mají připravené své karty, jídlo, léky i termíny u veterináře.",
+                title = "🐾 Vítej v aplikaci Moje kočičky!",
+                message = "Safírka (Ragdollka) a Zlatín (Mainská mývalí) mají připravené své karty, jídlo, léky, pojištění i termíny u veterináře.",
                 timeText = "08:00",
                 isRead = false
             ),
@@ -341,7 +422,10 @@ object CatDataSerializer {
                 enc(c.notes),
                 enc(c.photoBase64),
                 enc(c.lastCheckedDate),
-                enc(c.birthDate)
+                enc(c.birthDate),
+                enc(c.insuranceName),
+                enc(c.insuranceFrom),
+                enc(c.insuranceTo)
             ).joinToString("|")
         }
 
@@ -498,7 +582,10 @@ object CatDataSerializer {
                         notes = dec(p[11]),
                         photoBase64 = dec(p[12]),
                         lastCheckedDate = dec(p[13]),
-                        birthDate = if (p.size >= 15 && dec(p[14]).isNotBlank()) dec(p[14]) else defaultDob
+                        birthDate = if (p.size >= 15 && dec(p[14]).isNotBlank()) dec(p[14]) else defaultDob,
+                        insuranceName = if (p.size >= 16) dec(p[15]) else "PetExpert",
+                        insuranceFrom = if (p.size >= 17) dec(p[16]) else "1. 1. 2026",
+                        insuranceTo = if (p.size >= 18) dec(p[17]) else "31. 12. 2026"
                     )
                 }
             }

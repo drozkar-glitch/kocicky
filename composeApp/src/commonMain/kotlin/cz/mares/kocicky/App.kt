@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 
-// Baby Pink & Beige barevná paleta pro Terezku
+// Baby Pink & Beige barevná paleta
 private val BgBeigeLight = Color(0xFFFDFBF7)
 private val BgBeigeWarm = Color(0xFFF5EBE6)
 private val BabyPinkSoft = Color(0xFFFADADD)
@@ -605,13 +607,13 @@ fun App() {
                         notifications = appState.notifications,
                         onTestSystemNotification = {
                             PlatformManager.sendImmediateTestNotification(
-                                title = "🐾 Terezčiny Kočičky – Safírka & Zlatín",
+                                title = "🐾 Moje kočičky – Safírka & Zlatín",
                                 message = "Připomínka: Nezapomeň zkontrolovat misky, vodu, léky a termíny očkování! 💕"
                             )
                             val testItem = AppNotificationItem(
                                 id = "notif_${PlatformManager.currentTimeMillis()}",
                                 title = "🔔 Testovací upozornění odesláno",
-                                message = "Systémová notifikace byla odeslána do horní lišty telefonu.",
+                                message = "Systémová notifikace Moje kočičky byla odeslána do horní lišty telefonu.",
                                 timeText = "Právě teď",
                                 isRead = false
                             )
@@ -876,7 +878,7 @@ private fun TopHeaderBar(
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Terezčiny Kočičky",
+                    text = "Moje kočičky",
                     color = CocoaBrown,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.ExtraBold,
@@ -1026,6 +1028,11 @@ private fun CatsTabScreen(
             val pendingFoodsForCat = foods.count { it.catId == cat.id && it.lastFedDate != todayStr }
             val pendingMedsForCat = medications.count { it.catId == cat.id && it.lastGivenDate != todayStr }
             val nextVetForCat = vetVisits.firstOrNull { it.catId == cat.id && !it.isCompleted }
+            val computedAgeText = CatAgeCalculator.formatFullAgeSummary(
+                birthDate = cat.birthDate,
+                fallbackAgeText = cat.ageText,
+                todayDate = todayStr
+            )
 
             Card(
                 backgroundColor = BgBeigeLight,
@@ -1070,16 +1077,16 @@ private fun CatsTabScreen(
 
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "🎂 Narození: ${cat.birthDate}",
+                                text = "🎂 Narození: ${cat.birthDate}  •  Váha: ${cat.weightKg} kg",
                                 color = CocoaBrown,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Věk: ${cat.ageText}  •  Váha: ${cat.weightKg} kg",
-                                color = CocoaMuted,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                text = "⏳ Věk: $computedAgeText",
+                                color = BabyPinkDeep,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
@@ -1157,6 +1164,43 @@ private fun CatsTabScreen(
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
+
+                    // Proužek s pojištěním (Od - Do)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(BgBeigeWarm)
+                            .border(1.dp, SoftBorder, RoundedCornerShape(12.dp))
+                            .clickable { onEditCat(cat) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            val hasInsurance = cat.insuranceFrom.isNotBlank() || cat.insuranceTo.isNotBlank()
+                            val insLabel = if (cat.insuranceName.isNotBlank()) "${cat.insuranceName}: " else ""
+                            Text(
+                                text = if (hasInsurance) {
+                                    "🛡️ Pojištění $insLabel(Od ${cat.insuranceFrom.ifBlank { "?" }} do ${cat.insuranceTo.ifBlank { "?" }})"
+                                } else {
+                                    "🛡️ Pojištění: Nezadáno (klepni pro doplnění Od – Do)"
+                                },
+                                color = CocoaBrown,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "✏️",
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Proužek s nejbližší návštěvou veterináře / očkováním
                     Box(
@@ -1329,7 +1373,7 @@ private fun CatsTabScreen(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Při výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, fotky, jídlo, léky i veterina se ihned obnoví.",
+                        text = "Při výměně telefonu stačí zadat váš Rodinný účet a PIN a všechny kočičky, fotky, jídlo, léky, pojištění i veterina se ihned obnoví.",
                         color = CocoaMuted,
                         fontSize = 11.sp
                     )
@@ -2633,11 +2677,15 @@ private fun EditCatDialog(
 ) {
     var name by remember { mutableStateOf(cat.name) }
     var birthDate by remember { mutableStateOf(cat.birthDate) }
-    var ageText by remember { mutableStateOf(cat.ageText) }
     var weightKg by remember { mutableStateOf(cat.weightKg) }
     var furStatus by remember { mutableStateOf(cat.furStatus) }
+    var insuranceName by remember { mutableStateOf(cat.insuranceName) }
+    var insuranceFrom by remember { mutableStateOf(cat.insuranceFrom) }
+    var insuranceTo by remember { mutableStateOf(cat.insuranceTo) }
     var energy by remember { mutableStateOf(cat.energyLevel.toFloat()) }
     var notes by remember { mutableStateOf(cat.notes) }
+
+    val liveAgePreview = CatAgeCalculator.formatFullAgeSummary(birthDate, cat.ageText)
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -2648,7 +2696,11 @@ private fun EditCatDialog(
                 .fillMaxWidth()
                 .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = "✏️ Upravit kočičku: ${cat.name}",
                     color = CocoaBrown,
@@ -2666,33 +2718,65 @@ private fun EditCatDialog(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
-                OutlinedTextField(
-                    value = birthDate,
-                    onValueChange = { birthDate = it },
-                    label = { Text("Datum narození (např. 14. 5. 2024)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
-                        value = ageText,
-                        onValueChange = { ageText = it },
-                        label = { Text("Věk") },
+                        value = birthDate,
+                        onValueChange = { birthDate = it },
+                        label = { Text("Narození (DD. M. RRRR)") },
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1.3f)
                     )
                     OutlinedTextField(
                         value = weightKg,
                         onValueChange = { weightKg = it },
                         label = { Text("Váha (kg)") },
                         singleLine = true,
+                        modifier = Modifier.weight(0.7f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "⏳ Vypočtený věk: $liveAgePreview",
+                    color = BabyPinkDeep,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "🛡️ Pojištění kočičky (Od – Do):",
+                    color = CocoaBrown,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = insuranceName,
+                    onValueChange = { insuranceName = it },
+                    label = { Text("Pojišťovna / smlouva (např. PetExpert)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = insuranceFrom,
+                        onValueChange = { insuranceFrom = it },
+                        label = { Text("Platnost Od") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = insuranceTo,
+                        onValueChange = { insuranceTo = it },
+                        label = { Text("Platnost Do") },
+                        singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
 
+                Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = furStatus,
                     onValueChange = { furStatus = it },
@@ -2732,13 +2816,17 @@ private fun EditCatDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
+                            val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: cat.ageText
                             onSave(
                                 cat.copy(
                                     name = name.ifBlank { cat.name },
                                     birthDate = birthDate.ifBlank { cat.birthDate },
-                                    ageText = ageText.ifBlank { "2 roky" },
+                                    ageText = computedActual,
                                     weightKg = weightKg.ifBlank { "4.0" },
                                     furStatus = furStatus.ifBlank { "Hebká ✨" },
+                                    insuranceName = insuranceName.trim(),
+                                    insuranceFrom = insuranceFrom.trim(),
+                                    insuranceTo = insuranceTo.trim(),
                                     energyLevel = energy.toInt(),
                                     notes = notes,
                                     lastCheckedDate = PlatformManager.currentDateString()
@@ -2763,9 +2851,13 @@ private fun AddCatDialog(
     var name by remember { mutableStateOf("") }
     var selectedBreedType by remember { mutableStateOf("RAGDOLL") }
     var birthDate by remember { mutableStateOf("1. 5. 2025") }
-    var ageText by remember { mutableStateOf("1 rok") }
     var weightKg by remember { mutableStateOf("3.8") }
+    var insuranceName by remember { mutableStateOf("PetExpert") }
+    var insuranceFrom by remember { mutableStateOf("1. 1. 2026") }
+    var insuranceTo by remember { mutableStateOf("31. 12. 2026") }
     var notes by remember { mutableStateOf("Milá a hravá kočička 💕") }
+
+    val liveAgePreview = CatAgeCalculator.formatFullAgeSummary(birthDate, "1 rok")
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -2776,7 +2868,11 @@ private fun AddCatDialog(
                 .fillMaxWidth()
                 .border(2.dp, BabyPinkAccent, RoundedCornerShape(20.dp))
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = "🐾 Přidat novou kočičku",
                     color = CocoaBrown,
@@ -2789,15 +2885,6 @@ private fun AddCatDialog(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Jméno kočičky") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                OutlinedTextField(
-                    value = birthDate,
-                    onValueChange = { birthDate = it },
-                    label = { Text("Datum narození (např. 1. 5. 2025)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -2832,16 +2919,57 @@ private fun AddCatDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
-                        value = ageText,
-                        onValueChange = { ageText = it },
-                        label = { Text("Věk") },
+                        value = birthDate,
+                        onValueChange = { birthDate = it },
+                        label = { Text("Narození (DD. M. RRRR)") },
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1.3f)
                     )
                     OutlinedTextField(
                         value = weightKg,
                         onValueChange = { weightKg = it },
                         label = { Text("Váha (kg)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(0.7f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "⏳ Vypočtený věk: $liveAgePreview",
+                    color = BabyPinkDeep,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "🛡️ Pojištění kočičky (Od – Do):",
+                    color = CocoaBrown,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = insuranceName,
+                    onValueChange = { insuranceName = it },
+                    label = { Text("Pojišťovna / smlouva") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = insuranceFrom,
+                        onValueChange = { insuranceFrom = it },
+                        label = { Text("Platnost Od") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = insuranceTo,
+                        onValueChange = { insuranceTo = it },
+                        label = { Text("Platnost Do") },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
@@ -2871,13 +2999,14 @@ private fun AddCatDialog(
                                 "MAINE_COON" -> "Mainská mývalí"
                                 else -> "Kočička"
                             }
+                            val computedActual = CatAgeCalculator.formatActualAge(birthDate) ?: "1 rok"
                             onAdd(
                                 CatProfile(
                                     id = "cat_${PlatformManager.currentTimeMillis()}",
                                     name = name.ifBlank { "Micka" },
                                     breed = breedLabel,
                                     breedType = selectedBreedType,
-                                    ageText = ageText.ifBlank { "1 rok" },
+                                    ageText = computedActual,
                                     weightKg = weightKg.ifBlank { "4.0" },
                                     mood = "Mazlivá 💕",
                                     appetite = "Výborná 🐟",
@@ -2887,7 +3016,10 @@ private fun AddCatDialog(
                                     notes = notes,
                                     photoBase64 = "",
                                     lastCheckedDate = PlatformManager.currentDateString(),
-                                    birthDate = birthDate.ifBlank { "1. 5. 2025" }
+                                    birthDate = birthDate.ifBlank { "1. 5. 2025" },
+                                    insuranceName = insuranceName.trim(),
+                                    insuranceFrom = insuranceFrom.trim(),
+                                    insuranceTo = insuranceTo.trim()
                                 )
                             )
                         },
