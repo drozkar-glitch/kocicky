@@ -476,23 +476,86 @@ jobs:
           import zlib, struct, os
           icon_dir = "iosApp/iosApp/Assets.xcassets/AppIcon.appiconset"
           os.makedirs(icon_dir, exist_ok=True)
-          def make_png(path, w, h):
+
+          def in_tri(u, v, x1, y1, x2, y2, x3, y3):
+              d1 = (u - x2) * (y1 - y2) - (x1 - x2) * (v - y2)
+              d2 = (u - x3) * (y2 - y3) - (x2 - x3) * (v - y3)
+              d3 = (u - x1) * (y3 - y1) - (x3 - x1) * (v - y1)
+              has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
+              has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+              return not (has_neg and has_pos)
+
+          def in_ellipse(u, v, cx, cy, rx, ry):
+              dx = (u - cx) / rx
+              dy = (v - cy) / ry
+              return (dx * dx + dy * dy) <= 1.0
+
+          def pixel_rgb(u, v):
+              r, g, b = 250, 218, 221
+              if in_ellipse(u, v, 0.50, 0.50, 0.43, 0.43):
+                  r, g, b = 253, 251, 247
+              if in_ellipse(u, v, 0.50, 0.50, 0.385, 0.385):
+                  r, g, b = 248, 200, 220
+              hx = (u - 0.50) / 0.082
+              hy = (0.255 - v) / 0.082
+              if -1.3 <= hx <= 1.3 and -1.3 <= hy <= 1.3:
+                  a = hx * hx + hy * hy - 1.0
+                  if (a * a * a - hx * hx * hy * hy * hy) <= 0.0:
+                      r, g, b = 224, 108, 159
+              if in_tri(u, v, 0.21, 0.48, 0.185, 0.30, 0.325, 0.395) or in_tri(u, v, 0.47, 0.48, 0.495, 0.30, 0.355, 0.395):
+                  r, g, b = 92, 64, 51
+              if in_tri(u, v, 0.228, 0.46, 0.208, 0.34, 0.305, 0.405) or in_tri(u, v, 0.452, 0.46, 0.472, 0.34, 0.375, 0.405):
+                  r, g, b = 244, 167, 185
+              if in_ellipse(u, v, 0.34, 0.565, 0.152, 0.138):
+                  r, g, b = 212, 178, 165
+              if in_ellipse(u, v, 0.34, 0.565, 0.144, 0.130):
+                  r, g, b = 253, 251, 247
+              if in_ellipse(u, v, 0.285, 0.54, 0.027, 0.027) or in_ellipse(u, v, 0.395, 0.54, 0.027, 0.027):
+                  r, g, b = 58, 124, 165
+              if in_ellipse(u, v, 0.277, 0.53, 0.009, 0.009) or in_ellipse(u, v, 0.387, 0.53, 0.009, 0.009):
+                  r, g, b = 255, 255, 255
+              if in_tri(u, v, 0.318, 0.582, 0.362, 0.582, 0.34, 0.612):
+                  r, g, b = 231, 143, 179
+              if in_ellipse(u, v, 0.535, 0.545, 0.050, 0.105) or in_ellipse(u, v, 0.795, 0.545, 0.050, 0.105):
+                  r, g, b = 140, 88, 58
+              if in_ellipse(u, v, 0.665, 0.565, 0.142, 0.130):
+                  r, g, b = 217, 155, 102
+              if in_ellipse(u, v, 0.665, 0.610, 0.080, 0.056):
+                  r, g, b = 255, 245, 235
+              if in_ellipse(u, v, 0.612, 0.538, 0.025, 0.025) or in_ellipse(u, v, 0.718, 0.538, 0.025, 0.025):
+                  r, g, b = 59, 35, 20
+              if in_ellipse(u, v, 0.604, 0.528, 0.008, 0.008) or in_ellipse(u, v, 0.710, 0.528, 0.008, 0.008):
+                  r, g, b = 255, 255, 255
+              if in_ellipse(u, v, 0.665, 0.588, 0.032, 0.022):
+                  r, g, b = 45, 30, 23
+              if in_ellipse(u, v, 0.665, 0.638, 0.021, 0.028):
+                  r, g, b = 242, 139, 156
+              return bytes((r, g, b))
+
+          BASE = 256
+          grid = []
+          for y in range(BASE):
+              v = (y + 0.5) / BASE
+              row = [pixel_rgb((x + 0.5) / BASE, v) for x in range(BASE)]
+              grid.append(row)
+
+          def save_png(path, sz):
               raw = bytearray()
-              for y in range(h):
+              for y in range(sz):
+                  src_row = grid[(y * BASE) // sz]
                   raw.append(0)
-                  raw.extend(b"\xf4\xa7\xb9" * w)
+                  for x in range(sz):
+                      raw.extend(src_row[(x * BASE) // sz])
               def chunk(t, d):
                   return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
-              png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b"")
+              png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", sz, sz, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b"")
               with open(path, "wb") as f:
                   f.write(png)
-          master = f"{icon_dir}/app-icon-1024.png"
-          if not os.path.exists(master):
-              make_png(master, 1024, 1024)
+
+          save_png(f"{icon_dir}/app-icon-1024.png", 1024)
           for sz in [20, 29, 40, 58, 60, 76, 80, 87, 120, 152, 167, 180]:
-              target = f"{icon_dir}/icon-{sz}.png"
-              if not os.path.exists(target):
-                  make_png(target, sz, sz)
+              save_png(f"{icon_dir}/icon-{sz}.png", sz)
+          print("✅ Vygenerovana sada iOS ikon s kocickou, pejskem a srdickem (vcetne 1024x1024).")
           EOF
 
           if [ ! -f "iosApp/iosApp/Info.plist" ]; then
