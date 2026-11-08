@@ -214,7 +214,7 @@ jobs:
           if [ "$PUBLISH_TO_STORES" != "true" ]; then
             echo "ℹ️ VYSLEDEK HUAWEI APPGALLERY: Publikace do obchodu je vypnuta (rezim bez publikace). Preskakuji Huawei AppGallery."
           elif [ -s "iosApp/signing/huawei_key.json.b64" ]; then
-            echo "⏳ Pripojuji se k Huawei AppGallery Connect pres Service Account JWT..."
+            echo "⏳ Pripojuji se k Huawei AppGallery Connect..."
             base64 --decode < iosApp/signing/huawei_key.json.b64 > /tmp/huawei_key.json
             pip3 install --quiet --break-system-packages pyjwt cryptography requests || \
             pip3 install --quiet pyjwt cryptography requests
@@ -269,9 +269,9 @@ jobs:
                           except Exception:
                               pass
 
-              if "client_secret" in hk or "key" in hk:
-                  c_sec = hk.get("client_secret") or hk.get("key")
-                  c_id = hk.get("client_id") or sub_account
+              if "client_secret" in hk or "key" in hk or "clientSecret" in hk:
+                  c_sec = hk.get("client_secret") or hk.get("clientSecret") or hk.get("key")
+                  c_id = hk.get("client_id") or hk.get("clientId") or sub_account
                   tr = requests.post(f"{base_agc}/oauth2/v1/token", json={"grant_type": "client_credentials", "client_id": c_id, "client_secret": c_sec}, timeout=30)
                   if tr.ok and tr.json().get("access_token"):
                       at = tr.json()["access_token"]
@@ -440,6 +440,125 @@ jobs:
 
           if ! command -v xcodegen &> /dev/null; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+
+          mkdir -p iosApp/iosApp/Assets.xcassets/AppIcon.appiconset
+          cat << 'EOF' > iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/Contents.json
+          {
+            "images" : [
+              { "size" : "20x20", "idiom" : "iphone", "filename" : "icon-40.png", "scale" : "2x" },
+              { "size" : "20x20", "idiom" : "iphone", "filename" : "icon-60.png", "scale" : "3x" },
+              { "size" : "29x29", "idiom" : "iphone", "filename" : "icon-58.png", "scale" : "2x" },
+              { "size" : "29x29", "idiom" : "iphone", "filename" : "icon-87.png", "scale" : "3x" },
+              { "size" : "40x40", "idiom" : "iphone", "filename" : "icon-80.png", "scale" : "2x" },
+              { "size" : "40x40", "idiom" : "iphone", "filename" : "icon-120.png", "scale" : "3x" },
+              { "size" : "60x60", "idiom" : "iphone", "filename" : "icon-120.png", "scale" : "2x" },
+              { "size" : "60x60", "idiom" : "iphone", "filename" : "icon-180.png", "scale" : "3x" },
+              { "size" : "20x20", "idiom" : "ipad", "filename" : "icon-20.png", "scale" : "1x" },
+              { "size" : "20x20", "idiom" : "ipad", "filename" : "icon-40.png", "scale" : "2x" },
+              { "size" : "29x29", "idiom" : "ipad", "filename" : "icon-29.png", "scale" : "1x" },
+              { "size" : "29x29", "idiom" : "ipad", "filename" : "icon-58.png", "scale" : "2x" },
+              { "size" : "40x40", "idiom" : "ipad", "filename" : "icon-40.png", "scale" : "1x" },
+              { "size" : "40x40", "idiom" : "ipad", "filename" : "icon-80.png", "scale" : "2x" },
+              { "size" : "76x76", "idiom" : "ipad", "filename" : "icon-76.png", "scale" : "1x" },
+              { "size" : "76x76", "idiom" : "ipad", "filename" : "icon-152.png", "scale" : "2x" },
+              { "size" : "83.5x83.5", "idiom" : "ipad", "filename" : "icon-167.png", "scale" : "2x" },
+              { "size" : "1024x1024", "idiom" : "ios-marketing", "filename" : "app-icon-1024.png", "scale" : "1x" }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          EOF
+
+          python3 - << 'EOF'
+          import zlib, struct, os
+          icon_dir = "iosApp/iosApp/Assets.xcassets/AppIcon.appiconset"
+          os.makedirs(icon_dir, exist_ok=True)
+          def make_png(path, w, h):
+              raw = bytearray()
+              for y in range(h):
+                  raw.append(0)
+                  raw.extend(b"\xf4\xa7\xb9" * w)
+              def chunk(t, d):
+                  return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+              png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b"")
+              with open(path, "wb") as f:
+                  f.write(png)
+          master = f"{icon_dir}/app-icon-1024.png"
+          if not os.path.exists(master):
+              make_png(master, 1024, 1024)
+          for sz in [20, 29, 40, 58, 60, 76, 80, 87, 120, 152, 167, 180]:
+              target = f"{icon_dir}/icon-{sz}.png"
+              if not os.path.exists(target):
+                  make_png(target, sz, sz)
+          EOF
+
+          if [ ! -f "iosApp/iosApp/Info.plist" ]; then
+            cat << 'EOF' > iosApp/iosApp/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>cs</string>
+            <key>CFBundleExecutable</key>
+            <string>$(EXECUTABLE_NAME)</string>
+            <key>CFBundleIconName</key>
+            <string>AppIcon</string>
+            <key>CFBundleIdentifier</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>$(PRODUCT_NAME)</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>$(MARKETING_VERSION)</string>
+            <key>CFBundleVersion</key>
+            <string>$(CURRENT_PROJECT_VERSION)</string>
+            <key>LSRequiresIPhoneOS</key>
+            <true/>
+            <key>CADisableMinimumFrameDurationOnPhone</key>
+            <true/>
+            <key>ITSAppUsesNonExemptEncryption</key>
+            <false/>
+            <key>UIApplicationSceneManifest</key>
+            <dict>
+              <key>UIApplicationSupportsMultipleScenes</key>
+              <false/>
+            </dict>
+            <key>UILaunchScreen</key>
+            <dict/>
+            <key>UIRequiresFullScreen</key>
+            <true/>
+            <key>UISupportedInterfaceOrientations</key>
+            <array>
+              <string>UIInterfaceOrientationPortrait</string>
+              <string>UIInterfaceOrientationPortraitUpsideDown</string>
+              <string>UIInterfaceOrientationLandscapeLeft</string>
+              <string>UIInterfaceOrientationLandscapeRight</string>
+            </array>
+            <key>UISupportedInterfaceOrientations~ipad</key>
+            <array>
+              <string>UIInterfaceOrientationPortrait</string>
+              <string>UIInterfaceOrientationPortraitUpsideDown</string>
+              <string>UIInterfaceOrientationLandscapeLeft</string>
+              <string>UIInterfaceOrientationLandscapeRight</string>
+            </array>
+          </dict>
+          </plist>
+          EOF
+          else
+            plutil -replace CFBundleExecutable -string '$(EXECUTABLE_NAME)' iosApp/iosApp/Info.plist || true
+            plutil -replace CFBundleIdentifier -string '$(PRODUCT_BUNDLE_IDENTIFIER)' iosApp/iosApp/Info.plist || true
+            plutil -replace CFBundleName -string '$(PRODUCT_NAME)' iosApp/iosApp/Info.plist || true
+            plutil -replace CFBundlePackageType -string 'APPL' iosApp/iosApp/Info.plist || true
+            plutil -replace CFBundleShortVersionString -string '$(MARKETING_VERSION)' iosApp/iosApp/Info.plist || true
+            plutil -replace CFBundleVersion -string '$(CURRENT_PROJECT_VERSION)' iosApp/iosApp/Info.plist || true
+            plutil -replace CFBundleIconName -string 'AppIcon' iosApp/iosApp/Info.plist || plutil -insert CFBundleIconName -string 'AppIcon' iosApp/iosApp/Info.plist || true
           fi
 
           FW_PATH="$(pwd)/composeApp/build/bin/iosArm64/releaseFramework"
