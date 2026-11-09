@@ -223,6 +223,86 @@ actual object PlatformManager {
         return Triple(d.coerceIn(1, 31), mo.coerceIn(1, 12), y)
     }
 
+    private fun setExactAlarmSafely(
+        am: AlarmManager,
+        triggerAtMillis: Long,
+        pendingIntent: PendingIntent
+    ) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (am.canScheduleExactAlarms()) {
+                    am.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                } else {
+                    am.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent
+                )
+            } else {
+                am.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent
+                )
+            }
+        } catch (_: SecurityException) {
+            am.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerAtMillis,
+                pendingIntent
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    fun scheduleNextDailyExactAlarm(
+        context: Context,
+        notifId: Int,
+        title: String,
+        message: String,
+        hour: Int,
+        minute: Int
+    ) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(context, NotificationReceiver::class.java).apply {
+            putExtra("title", title)
+            putExtra("message", message)
+            putExtra("notifId", notifId)
+            putExtra("isDaily", true)
+            putExtra("hour", hour)
+            putExtra("minute", minute)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            notifId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val now = System.currentTimeMillis()
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis <= now + 5000L) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+        setExactAlarmSafely(am, cal.timeInMillis, pendingIntent)
+    }
+
     actual fun scheduleMedicationNotification(
         id: String,
         catName: String,
@@ -235,18 +315,9 @@ actual object PlatformManager {
         val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 8
         val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
 
-        val intent = Intent(ctx, NotificationReceiver::class.java).apply {
-            putExtra("title", "🐾 $catName – $medName")
-            putExtra("message", "Čas ($timeHhMm): $dosage")
-            putExtra("notifId", id.hashCode())
-        }
-
-        val pendingIntent = PendingIntent.getBroadcast(
-            ctx,
-            id.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val title = "🐾 $catName • $medName"
+        val message = "Čas ($timeHhMm): $dosage"
+        val notifId = id.hashCode()
 
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val specificDate = extractSpecificDate(medName)
@@ -264,25 +335,23 @@ actual object PlatformManager {
                     set(Calendar.MILLISECOND, 0)
                 }
                 if (cal.timeInMillis > System.currentTimeMillis()) {
-                    am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pendingIntent)
+                    val intent = Intent(ctx, NotificationReceiver::class.java).apply {
+                        putExtra("title", title)
+                        putExtra("message", message)
+                        putExtra("notifId", notifId)
+                        putExtra("isDaily", false)
+                    }
+                    val pendingIntent = PendingIntent.getBroadcast(
+                        ctx,
+                        notifId,
+                        intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    setExactAlarmSafely(am, cal.timeInMillis, pendingIntent)
                 }
             } else {
-                // Pravidelné denní upozornění (krmení a léky)
-                val cal = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, hour)
-                    set(Calendar.MINUTE, minute)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                    if (timeInMillis <= System.currentTimeMillis()) {
-                        add(Calendar.DAY_OF_YEAR, 1)
-                    }
-                }
-                am.setInexactRepeating(
-                    AlarmManager.RTC_WAKEUP,
-                    cal.timeInMillis,
-                    AlarmManager.INTERVAL_DAY,
-                    pendingIntent
-                )
+                // Pravidelné denní upozornění (krmení a léky) přes přesný budík
+                scheduleNextDailyExactAlarm(ctx, notifId, title, message, hour, minute)
             }
         } catch (_: Exception) {
         }
@@ -317,7 +386,6 @@ actual object PlatformManager {
             launchIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val smallIconRes = context.applicationInfo.icon.takeIf { it != 0 }
             ?: android.R.drawable.ic_dialog_info
 
