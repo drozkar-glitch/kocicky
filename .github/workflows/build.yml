@@ -13,6 +13,7 @@ env:
   PUBLISH_TO_STORES: "true"
   BUILD_IOS: "true"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  GRADLE_OPTS: "-Djava.net.preferIPv4Stack=true -Dorg.gradle.internal.http.connectionTimeout=120000 -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.repository.max.tentatives=6 -Dorg.gradle.internal.repository.initial.backoff=3000"
 jobs:
   build-android:
     name: Android Release (.apk & .aab)
@@ -25,6 +26,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
       - name: Detect Package Name and Prepare Build Number
         run: |
           BUILD_NUM=$(( ${GITHUB_RUN_NUMBER:-1} + 100 ))
@@ -87,7 +89,12 @@ jobs:
             sed -i "s/versionName = \"[0-9.]*\\.\$ciBuildNumber\"/versionName = \"${APP_VERSION}.\$ciBuildNumber\"/g" composeApp/build.gradle.kts || true
             sed -i "s/versionName = \"[0-9.]*\\.\\\${ciBuildNumber}\"/versionName = \"${APP_VERSION}.\\\${ciBuildNumber}\"/g" composeApp/build.gradle.kts || true
           fi
-          ./gradlew :composeApp:bundleRelease :composeApp:assembleRelease
+          for gw_try in 1 2 3; do
+            ./gradlew :composeApp:bundleRelease :composeApp:assembleRelease --no-daemon && break
+            if [ "$gw_try" -eq 3 ]; then exit 1; fi
+            echo "⚠️ Vypadek site (dl.google.com), opakuji Android build ($gw_try/3) za 15 s..."
+            sleep 15
+          done
           VERSION_NAME="${APP_VERSION}.${PROJECT_BUILD_NUMBER}"
           mv composeApp/build/outputs/apk/release/composeApp-release.apk "composeApp/build/outputs/apk/release/${APP_NAME}-${VERSION_NAME}.apk"
           mv composeApp/build/outputs/bundle/release/composeApp-release.aab "composeApp/build/outputs/bundle/release/${APP_NAME}-${VERSION_NAME}.aab"
@@ -237,6 +244,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
       - name: Fetch Signing Keys from Private Vault (ios-keys)
         env:
           VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
@@ -270,7 +278,12 @@ jobs:
             cp -f /tmp/gw_init/gradlew . && cp -rf /tmp/gw_init/gradle .
           fi
           chmod +x gradlew
-          ./gradlew :composeApp:linkReleaseFrameworkIosArm64
+          for gw_try in 1 2 3; do
+            ./gradlew :composeApp:linkReleaseFrameworkIosArm64 --no-daemon && break
+            if [ "$gw_try" -eq 3 ]; then exit 1; fi
+            echo "⚠️ Vypadek site (dl.google.com), opakuji iOS build ($gw_try/3) za 15 s..."
+            sleep 15
+          done
           if ! command -v xcodegen &> /dev/null; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
           pip3 install --quiet --break-system-packages Pillow resvg-py || pip3 install --quiet Pillow resvg-py || pip3 install --quiet --break-system-packages Pillow || pip3 install --quiet Pillow
           python3 - << 'PYEOF'
@@ -687,7 +700,7 @@ jobs:
               r = requests.get(url, headers=hdrs, timeout=30)
               if r.ok:
                   d = r.json(); raw = base64.b64decode(d["content"]).decode("utf-8")
-                  updated = re.sub(r'(APP_VERSION:\s*"[^"]*")', f'APP_VERSION: "1.1"', raw)
+                  updated = re.sub(r'(APP_VERSION:\s*"[^"]*")', f'APP_VERSION: "{new_ver}"', raw)
                   if updated != raw:
                       requests.put(url, headers=hdrs, json={"message": f"Automaticka aktualizace hlavni verze na {new_ver} [skip ci]", "content": base64.b64encode(updated.encode("utf-8")).decode("utf-8"), "sha": d["sha"]}, timeout=30)
           PYEOF
@@ -788,4 +801,4 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-iOS-IPA
           path: build/ios/ipa/*.ipa
-# Sync: 2026-11-10T00:24:43.525Z
+# Sync: 2026-11-10T01:15:11.591Z
